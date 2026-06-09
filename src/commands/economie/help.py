@@ -35,6 +35,8 @@ _RP = (
     "`/rpimage <user> <image>` — Changer l'image d'un personnage\n"
     "`/rpdelete <user>` — Supprimer un personnage (sélection)\n"
     "`/rpbourse [user]` — Voir la bourse Nax d'un personnage\n"
+    "`/addnax <user> <montant>` — Ajouter des Nax à un personnage\n"
+    "`/removenax <user> <montant>` — Retirer des Nax à un personnage\n"
     "`/rplist [user]` — Lister les personnages d'un utilisateur\n"
     "`/setrpchannel <channel>` — Définir le channel d'annonce RP"
 )
