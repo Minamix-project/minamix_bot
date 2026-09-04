@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import pymysql
 import discord
 from discord.ext import commands
+from discord import app_commands
 
 from src.config import GUILD_IDS
 from src.core.db_init import init_db
@@ -45,6 +46,20 @@ async def _main():
             )
             return False
         return True
+
+
+    @bot.tree.error
+    async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CheckFailure):
+            message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
+        else:
+            print(f"[ERREUR COMMANDE] {interaction.command}: {error}")
+            message = "❌ Une erreur est survenue pendant l'exécution de cette commande."
+
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
     bot.tree.interaction_check = guild_only
 

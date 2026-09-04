@@ -33,3 +33,4 @@ async def register(bot):
         embed.add_field(name="Version", value=os.getenv("BOT_VERSION", "dev"), inline=True)
         embed.add_field(name="Serveurs autorisés", value=str(len(GUILD_IDS)), inline=True)
         set_bot_footer(embed, interaction)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
