@@ -9,6 +9,7 @@ from discord import app_commands
 from src.config import GUILD_IDS
 from src.core.db_init import init_db
 from src.core.loader import load_modules
+from src.utils.db import get_db_connection
 from src.utils.permissions import configure_command_permissions
 
 
