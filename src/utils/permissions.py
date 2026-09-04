@@ -1,30 +1,13 @@
 """Règles d'accès partagées pour les commandes du bot."""
 
-import os
-
 import discord
 from discord import app_commands
 
 from src.utils.rp import RP_ALLOWED_ROLES
 
 
-_DEFAULT_DEVELOPER_IDS = {840870799064956930}
-
-
-def _developer_ids() -> set[int]:
-    configured = os.getenv("DEVELOPER_USER_IDS", "")
-    ids = set(_DEFAULT_DEVELOPER_IDS)
-    for value in configured.split(","):
-        value = value.strip()
-        if value.isdigit():
-            ids.add(int(value))
-    return ids
-
-
 def is_admin(member: discord.abc.User) -> bool:
-    """True pour un administrateur Discord ou un développeur déclaré."""
-    if member.id in _developer_ids():
-        return True
+    """True pour un administrateur Discord."""
     permissions = getattr(member, "guild_permissions", None)
     return bool(permissions and permissions.administrator)
 

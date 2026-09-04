@@ -45,7 +45,7 @@ services:
           timestamp=$$(date -u +%Y-%m-%dT%H-%M-%SZ)
           target="/backups/$$DB_NAME-$$timestamp.sql"
           temp="$$target.tmp"
-          MYSQL_PWD="$$DB_PASSWORD" mysqldump --no-tablespaces -h db -u "$$DB_USER" "$$DB_NAME" > "$$temp"
+          MYSQL_PWD="$$DB_PASSWORD" mysqldump -h db -u "$$DB_USER" "$$DB_NAME" > "$$temp"
           mv "$$temp" "$$target"
           find /backups -type f -name '*.sql' -mtime +14 -delete
         }
