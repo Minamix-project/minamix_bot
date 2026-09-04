@@ -61,6 +61,30 @@ async def _main():
         else:
             await interaction.response.send_message(message, ephemeral=True)
 
+    async def send_deployment_logs() -> None:
+        if os.getenv("DEPLOY_NOTIFICATION") != "1":
+            return
+        for guild_id in GUILD_IDS:
+            db = get_db_connection()
+            try:
+                with db.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
+                        (guild_id,),
+                    )
+                    row = cursor.fetchone()
+            finally:
+                db.close()
+            if not row:
+                continue
+            channel = bot.get_channel(int(row[0]))
+            if channel is None:
+                continue
+            embed = discord.Embed(title="🚀 Déploiement du bot", color=discord.Color.green())
+            embed.add_field(name="Version", value=os.getenv("BOT_VERSION", "dev"), inline=True)
+            embed.add_field(name="Commit", value=os.getenv("GIT_COMMIT", "inconnu"), inline=True)
+            await channel.send(embed=embed)
+
     bot.tree.interaction_check = guild_only
 
     @bot.event
@@ -80,6 +104,7 @@ async def _main():
                 print(f"[SYNC] {len(synced)} commandes → {guild_id}")
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
+            await send_deployment_logs()
         except Exception as e:
             print(f"[ERREUR SYNC] {e}")
 

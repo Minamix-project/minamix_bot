@@ -18,66 +18,76 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
     await interaction.response.defer()
 
     role = interaction.guild.get_role(int(role_id))
-    if role and role in interaction.user.roles:
-        embed = Embed(
-            title="❌ Rôle déjà possédé",
-            description=f"Tu as déjà <@&{role_id}>.",
-            color=discord.Color.red()
-        )
-        set_bot_footer(embed, interaction)
-        await interaction.edit_original_response(embed=embed, view=None)
+    if role is None:
+        await interaction.edit_original_response(content="❌ Le rôle associé à cet article n'existe plus.", view=None)
+        return
+    if role in interaction.user.roles:
+        await interaction.edit_original_response(content=f"❌ Tu possèdes déjà {role.mention}.", view=None)
         return
 
     db = get_db_connection()
-    user_id = interaction.user.id
-    current_balance = await get_user_balance(db, user_id)
-
-    if current_balance < prix:
-        embed = Embed(
-            title="❌ Solde insuffisant",
-            description=f"Tu as **{format_amount(current_balance)}💰** mais cet article coûte **{format_amount(prix)}💰**.",
-            color=discord.Color.red()
-        )
-        set_bot_footer(embed, interaction)
-        await interaction.edit_original_response(embed=embed, view=None)
-        db.close()
-        return
-
+    role_added = False
     try:
-        await modify_user_balance(db, user_id, prix, "remove")
-    except Exception:
-        embed = Embed(title="❌ Erreur", description="Une erreur est survenue lors du paiement.", color=discord.Color.red())
-        set_bot_footer(embed, interaction)
-        await interaction.edit_original_response(embed=embed, view=None)
-        db.close()
+        db.begin()
+        with db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO wallets (user_id, balance) VALUES (%s, 0) "
+                "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
+                (interaction.user.id,),
+            )
+            cursor.execute("SELECT balance FROM wallets WHERE user_id = %s FOR UPDATE", (interaction.user.id,))
+            current_balance = cursor.fetchone()[0]
+
+            if current_balance < prix:
+                db.rollback()
+                embed = Embed(
+                    title="❌ Solde insuffisant",
+                    description=f"Tu as **{format_amount(current_balance)}💰** mais cet article coûte **{format_amount(prix)}💰**.",
+                    color=discord.Color.red(),
+                )
+                set_bot_footer(embed, interaction)
+                await interaction.edit_original_response(embed=embed, view=None)
+                return
+
+            try:
+                await interaction.user.add_roles(role, reason=f"Achat boutique : {nom_role}")
+                role_added = True
+            except (discord.Forbidden, discord.HTTPException):
+                db.rollback()
+                await interaction.edit_original_response(
+                    content="❌ Impossible d'attribuer ce rôle. Aucun coin n'a été retiré.", view=None
+                )
+                return
+
+            cursor.execute(
+                "UPDATE wallets SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
+                (prix, interaction.user.id, prix),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Le solde a changé pendant l'achat.")
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if role_added:
+            try:
+                await interaction.user.remove_roles(role, reason="Annulation d'un achat boutique échoué")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+        print(f"[ACHAT] Échec pour {interaction.user.id}: {exc}")
+        await interaction.edit_original_response(
+            content="❌ L'achat a échoué. Aucun coin n'a été retiré.", view=None
+        )
         return
+    finally:
+        db.close()
 
-    try:
-        role = interaction.guild.get_role(int(role_id))
-        if role:
-            await interaction.user.add_roles(role)
-            role_added = True
-        else:
-            role_added = False
-    except Exception:
-        role_added = False
-
-    if role_added:
-        embed = Embed(
-            title="✅ Achat réussi !",
-            description=f"Tu as acheté <@&{role_id}> pour **{format_amount(prix)}💰**.\nLe rôle t'a été attribué avec succès.",
-            color=discord.Color.green()
-        )
-    else:
-        embed = Embed(
-            title="✅ Achat réussi !",
-            description=f"Tu as acheté <@&{role_id}> pour **{format_amount(prix)}💰**.\n\n⚠️ *Impossible d'attribuer le rôle automatiquement. Contacte un admin.*",
-            color=discord.Color.orange()
-        )
-
+    embed = Embed(
+        title="✅ Achat réussi !",
+        description=f"Tu as acheté {role.mention} pour **{format_amount(prix)}💰**.",
+        color=discord.Color.green(),
+    )
     set_bot_footer(embed, interaction)
     await interaction.edit_original_response(embed=embed, view=None)
-    db.close()
 
 
 async def _show_confirmation(interaction: Interaction, role_id: int, prix: int, nom_role: str, edit: bool = False):

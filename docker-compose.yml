@@ -19,6 +19,10 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      BOT_VERSION: ${BOT_VERSION:-dev}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      DEPLOY_NOTIFICATION: ${DEPLOY_NOTIFICATION:-0}
     volumes:
       - ./backups:/app/backups:ro
     depends_on:
