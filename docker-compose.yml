@@ -23,5 +23,37 @@ services:
       db:
         condition: service_healthy
 
+  backup:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-21600}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backups:/backups
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        backup() {
+          timestamp=$$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          target="/backups/$$DB_NAME-$$timestamp.sql"
+          temp="$$target.tmp"
+          MYSQL_PWD="$$DB_PASSWORD" mysqldump -h db -u "$$DB_USER" "$$DB_NAME" > "$$temp"
+          mv "$$temp" "$$target"
+          find /backups -type f -name '*.sql' -mtime +14 -delete
+        }
+        trap 'backup; exit 0' INT TERM
+        while true; do
+          backup
+          sleep "$$BACKUP_INTERVAL_SECONDS" & wait $$!
+        done
+
 volumes:
   mysql_data:

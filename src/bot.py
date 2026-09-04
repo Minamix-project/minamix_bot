@@ -8,6 +8,7 @@ from discord.ext import commands
 from src.config import GUILD_IDS
 from src.core.db_init import init_db
 from src.core.loader import load_modules
+from src.utils.permissions import configure_command_permissions
 
 
 def run_bot():
@@ -69,6 +70,7 @@ async def _main():
 
     await load_modules(bot, "src/events", "EVENT")
     await load_modules(bot, "src/commands", "CMD")
+    configure_command_permissions(bot)
 
     try:
         await bot.start(token)

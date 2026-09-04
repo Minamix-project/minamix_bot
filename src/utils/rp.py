@@ -12,7 +12,9 @@ _prefix_cache: dict[int, dict[str, tuple]] = {}
 
 
 def has_rp_permission(member) -> bool:
-    return any(r.id in RP_ALLOWED_ROLES for r in member.roles)
+    # Import local pour éviter une dépendance circulaire au chargement.
+    from src.utils.permissions import is_rp_manager
+    return is_rp_manager(member)
 
 
 def get_prefix_cache(guild_id: int) -> dict[str, tuple]:
