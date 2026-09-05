@@ -1,15 +1,36 @@
 """Règles d'accès partagées pour les commandes du bot."""
 
+import os
+from functools import lru_cache
+
 import discord
 from discord import app_commands
 
 from src.utils.rp import RP_ALLOWED_ROLES
 
 
+@lru_cache(maxsize=1)
+def get_bot_admin_role_ids() -> frozenset[int]:
+    """Rôles autorisés par BOT_ADMIN_ROLE_IDS (IDs séparés par des virgules)."""
+    role_ids = set()
+    for raw_id in os.getenv("BOT_ADMIN_ROLE_IDS", "").split(","):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            role_ids.add(int(raw_id))
+        except ValueError:
+            print(f"[PERMS] ID de rôle admin ignoré : {raw_id!r}")
+    return frozenset(role_ids)
+
+
 def is_admin(member: discord.abc.User) -> bool:
-    """True pour un administrateur Discord."""
+    """True pour un admin Discord ou un rôle administrateur du bot."""
     permissions = getattr(member, "guild_permissions", None)
-    return bool(permissions and permissions.administrator)
+    if permissions and permissions.administrator:
+        return True
+    allowed_roles = get_bot_admin_role_ids()
+    return any(role.id in allowed_roles for role in getattr(member, "roles", ()))
 
 
 def is_rp_manager(member: discord.abc.User) -> bool:

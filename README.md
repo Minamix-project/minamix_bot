@@ -28,6 +28,7 @@ A Discord bot with an economy system, shop, moderation tools, ...
    DB_POOL_MIN_SIZE=1
    DB_POOL_MAX_SIZE=10
    DB_POOL_RECYCLE_SECONDS=1800
+   BOT_ADMIN_ROLE_IDS=123456789012345678,987654321098765432
    ```
 
 3. Start the bot:
@@ -39,6 +40,18 @@ A Discord bot with an economy system, shop, moderation tools, ...
 MySQL access uses an asynchronous connection pool. These pool settings are
 optional and already use the displayed values by default.
 The database is initialized automatically on first start.
+
+### Role-based bot administrators
+
+`BOT_ADMIN_ROLE_IDS` is a comma-separated list of Discord role IDs. Members with
+one of these roles pass the bot-side administrator checks without receiving the
+full Discord Administrator permission.
+
+Admin commands keep `Administrator` as their default Discord permission so they
+remain hidden. On each server, a member with **Manage Server** and **Manage
+Roles** must open `Server Settings > Integrations > Aurum > Manage` and allow
+the selected role on each admin command. Both layers are required: the Discord
+override controls visibility, while `BOT_ADMIN_ROLE_IDS` controls execution.
 
 ## Commands
 
