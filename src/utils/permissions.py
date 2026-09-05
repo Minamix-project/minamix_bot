@@ -7,9 +7,12 @@ from src.utils.rp import RP_ALLOWED_ROLES
 
 
 def is_admin(member: discord.abc.User) -> bool:
-    """True pour un administrateur Discord."""
+    """True avec Administrateur ou Gérer le serveur."""
     permissions = getattr(member, "guild_permissions", None)
-    return bool(permissions and permissions.administrator)
+    return bool(
+        permissions
+        and (permissions.administrator or permissions.manage_guild)
+    )
 
 
 def is_rp_manager(member: discord.abc.User) -> bool:
@@ -22,7 +25,7 @@ def is_rp_manager(member: discord.abc.User) -> bool:
 def admin_only():
     """Marque une commande comme admin dans Discord et vérifie l'accès côté bot."""
     def decorator(func):
-        func = app_commands.default_permissions(administrator=True)(func)
+        func = app_commands.default_permissions(manage_guild=True)(func)
         return app_commands.check(lambda interaction: is_admin(interaction.user))(func)
     return decorator
 

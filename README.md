@@ -40,6 +40,13 @@ MySQL access uses an asynchronous connection pool. These pool settings are
 optional and already use the displayed values by default.
 The database is initialized automatically on first start.
 
+### Bot administration permissions
+
+Administrative commands require Discord’s **Manage Server** permission. Server
+administrators are also accepted automatically. Discord uses the same permission
+to control command visibility, and the bot checks it again when a command runs.
+
+
 ## Commands
 
 ### Economy

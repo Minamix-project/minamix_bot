@@ -18,7 +18,7 @@ def test_registered_command_permissions():
     for name in ADMIN_COMMANDS:
         command = registered[name]
         assert command.default_permissions is not None
-        assert command.default_permissions.administrator
+        assert command.default_permissions.manage_guild
         assert command.checks
 
     for name in RP_MANAGER_COMMANDS:
