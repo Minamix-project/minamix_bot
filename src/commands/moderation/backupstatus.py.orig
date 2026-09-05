@@ -14,10 +14,3 @@ async def register(bot):
         if not backups:
             await interaction.response.send_message("❌ Aucun dump SQL trouvé.", ephemeral=True)
             return
-        latest = max(backups, key=lambda path: path.stat().st_mtime)
-        modified = datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc)
-        await interaction.response.send_message(
-            f"💾 Dernier dump : `{latest.name}`\nDate : <t:{int(modified.timestamp())}:F>\n"
-            f"Taille : `{latest.stat().st_size:,}` octets",
-            ephemeral=True,
-        )
