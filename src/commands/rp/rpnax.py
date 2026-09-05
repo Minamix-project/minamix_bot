@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select
@@ -12,13 +13,8 @@ async def register(bot):
 
     @bot.tree.command(name="addnax", description="Ajouter des Nax à un personnage (Admin)")
     @app_commands.describe(user="Propriétaire du personnage", montant="Montant à ajouter")
+    @admin_only()
     async def addnax(interaction: Interaction, user: Member, montant: int):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if montant <= 0:
             await interaction.response.send_message("❌ Le montant doit être positif.", ephemeral=True)
             return
@@ -27,13 +23,8 @@ async def register(bot):
 
     @bot.tree.command(name="removenax", description="Retirer des Nax à un personnage (Admin)")
     @app_commands.describe(user="Propriétaire du personnage", montant="Montant à retirer")
+    @admin_only()
     async def removenax(interaction: Interaction, user: Member, montant: int):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if montant <= 0:
             await interaction.response.send_message("❌ Le montant doit être positif.", ephemeral=True)
             return

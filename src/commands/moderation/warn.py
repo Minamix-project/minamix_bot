@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from src.utils.embed import set_bot_footer
@@ -7,13 +8,8 @@ from src.utils.warn import issue_warn
 async def register(bot):
     @bot.tree.command(name="warn", description="Avertir un membre (Admin seulement)")
     @app_commands.describe(user="Membre à avertir", reason="Raison de l'avertissement")
+    @admin_only()
     async def warn(interaction: Interaction, user: Member, reason: str):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if user.bot:
             embed = discord.Embed(title="❌ Impossible d'avertir un bot.", color=discord.Color.red())
             set_bot_footer(embed, interaction)

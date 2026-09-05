@@ -1,3 +1,4 @@
+from src.utils.permissions import rp_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select
@@ -13,6 +14,7 @@ async def register(bot):
         user="Utilisateur propriétaire du personnage",
         image="Nouvelle image (fichier)",
     )
+    @rp_only()
     async def rpimage(interaction: Interaction, user: Member, image: discord.Attachment):
         if not has_rp_permission(interaction.user):
             embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())

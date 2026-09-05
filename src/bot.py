@@ -11,7 +11,7 @@ from src.config import GUILD_IDS
 from src.core.db_init import init_db
 from src.core.loader import load_modules
 from src.utils.db import close_db_pool, create_db_pool, get_db_connection
-from src.utils.permissions import ADMIN_COMMANDS, configure_command_permissions
+from src.utils.permissions import ADMIN_COMMANDS
 from src.utils.audit import record_admin_action
 from src.utils.error_reporting import report_error
 
@@ -176,7 +176,6 @@ async def _main():
 
     await load_modules(bot, "src/events", "EVENT")
     await load_modules(bot, "src/commands", "CMD")
-    configure_command_permissions(bot)
 
     try:
         await bot.start(token)

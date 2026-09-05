@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, app_commands
 import discord
 from src.utils.shop import get_shop_items, item_autocomplete
@@ -23,6 +24,7 @@ async def register(bot):
         app_commands.Choice(name="Oui", value=1),
     ])
     @app_commands.autocomplete(numero=item_autocomplete)
+    @admin_only()
     async def edititem(
         interaction: Interaction,
         numero: str,
@@ -31,12 +33,6 @@ async def register(bot):
         description: str = None,
         exclusif: int = None,
     ):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         items = await get_shop_items(interaction.guild_id)
 
         try:

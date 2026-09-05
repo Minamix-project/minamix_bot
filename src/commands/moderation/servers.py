@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction
 import discord
 from src.utils.embed import set_bot_footer
@@ -6,13 +7,8 @@ from src.config import GUILD_IDS
 
 async def register(bot):
     @bot.tree.command(name="servers", description="Afficher les serveurs autorisés (Admin seulement)")
+    @admin_only()
     async def servers(interaction: Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         lines = []
         for guild_id in GUILD_IDS:
             guild = bot.get_guild(guild_id)

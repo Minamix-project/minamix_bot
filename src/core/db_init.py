@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from src.core.schema_migrations import run_schema_migrations
@@ -119,8 +120,17 @@ async def init_db(db):
             continue
         if sql_file.name.startswith("_"):
             continue
+        sql = sql_file.read_text(encoding="utf-8")
+        table_match = re.search(
+            r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([A-Za-z0-9_]+)`?",
+            sql,
+            re.IGNORECASE,
+        )
+        if table_match and await _table_exists(cursor, table_match.group(1)):
+            print(f"[SQL] {sql_file} (déjà présente)")
+            continue
         try:
-            await cursor.execute(sql_file.read_text(encoding="utf-8"))
+            await cursor.execute(sql)
             print(f"[SQL] {sql_file}")
         except Exception as e:
             print(f"[ERREUR SQL] {sql_file}: {e}")

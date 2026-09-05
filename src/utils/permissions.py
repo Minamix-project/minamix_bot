@@ -34,21 +34,3 @@ def rp_only():
 
 ADMIN_COMMANDS = frozenset({"addantispam", "additem", "addmoney", "addnax", "backupstatus", "config", "economystats", "edititem", "giveitem", "listantispam", "removeantispam", "removeitem", "removemoney", "removenax", "resetbalances", "setafklogs", "setlogs", "setrpchannel", "setwarnlogs", "servers", "warn", "warnings", "delwarn", "activity", "absents", "health", "economyconfig", "addecoignore", "removeecoignore", "listecoignore", "audit", "seterrorlogs"})
 RP_MANAGER_COMMANDS = frozenset({"rpcreate", "rpdelete", "rpedit", "rpimage"})
-
-
-def configure_command_permissions(bot: discord.Client) -> None:
-    """Applique les règles communes avant la synchronisation des commandes."""
-    for name in ADMIN_COMMANDS:
-        command = bot.tree.get_command(name)
-        if command is None:
-            print(f"[PERMS] Commande admin introuvable : {name}")
-            continue
-        command.default_permissions = discord.Permissions(administrator=True)
-        command.add_check(lambda interaction: is_admin(interaction.user))
-
-    for name in RP_MANAGER_COMMANDS:
-        command = bot.tree.get_command(name)
-        if command is None:
-            print(f"[PERMS] Commande RP introuvable : {name}")
-            continue
-        command.add_check(lambda interaction: is_rp_manager(interaction.user))

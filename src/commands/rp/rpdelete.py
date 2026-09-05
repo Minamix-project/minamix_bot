@@ -1,3 +1,4 @@
+from src.utils.permissions import rp_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select
@@ -11,6 +12,7 @@ from src.utils.confirm import confirm_action
 async def register(bot):
     @bot.tree.command(name="rpdelete", description="Supprimer un personnage RP")
     @app_commands.describe(user="Utilisateur propriétaire du personnage")
+    @rp_only()
     async def rpdelete(interaction: Interaction, user: Member):
         if not has_rp_permission(interaction.user):
             embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())

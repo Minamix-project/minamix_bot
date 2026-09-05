@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from datetime import datetime, timezone
@@ -8,12 +9,8 @@ from src.utils.embed import set_bot_footer
 async def register(bot):
     @bot.tree.command(name="activity", description="Voir l'activité d'un membre (Admin seulement).")
     @app_commands.describe(user="Membre à consulter")
+    @admin_only()
     async def activity(interaction: Interaction, user: Member):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
         await interaction.response.defer()
 
         db = await get_db_connection()
