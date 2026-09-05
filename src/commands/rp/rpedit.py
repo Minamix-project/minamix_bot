@@ -64,6 +64,12 @@ async def register(bot):
                     name_val = self.new_name.value.strip()
                     prefix_val = self.new_prefix.value.strip()
 
+                    if not 1 <= len(name_val) <= 100 or not 1 <= len(prefix_val) <= 20:
+                        await modal_inter.response.send_message(
+                            "❌ Le nom doit faire 1–100 caractères et le préfixe 1–20 caractères.", ephemeral=True
+                        )
+                        return
+
                     updates = []
                     values = []
                     changes = []
@@ -95,7 +101,12 @@ async def register(bot):
                     except Exception as e:
                         await cursor2.close()
                         db2.close()
-                        msg = f"Le préfixe `{prefix_val}` est déjà pris." if "Duplicate" in str(e) else str(e)
+                        import logging
+                        if "Duplicate" in str(e):
+                            msg = f"Le préfixe `{prefix_val}` est déjà pris."
+                        else:
+                            logging.getLogger(__name__).exception("Could not edit RP character")
+                            msg = "Une erreur interne est survenue. Réessaie plus tard."
                         await modal_inter.response.send_message(f"❌ {msg}", ephemeral=True)
                         return
 

@@ -22,7 +22,7 @@ async def register(bot):
         prefix: str,
         image: discord.Attachment,
     ):
-        if not image.content_type or not image.content_type.startswith("image/"):
+        if not image.content_type or not image.content_type.startswith("image/") or image.size > 8 * 1024 * 1024:
             embed = discord.Embed(
                 title="❌ Fichier invalide",
                 description="Le fichier joint doit être une image.",
@@ -32,7 +32,11 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
+        name = name.strip()
         prefix = prefix.strip()
+        if not 1 <= len(name) <= 100:
+            await interaction.response.send_message("❌ Le nom doit faire entre 1 et 100 caractères.", ephemeral=True)
+            return
         if len(prefix) < 1 or len(prefix) > 20:
             embed = discord.Embed(
                 title="❌ Préfixe invalide",
@@ -70,6 +74,10 @@ async def register(bot):
         except Exception as e:
             await cursor.close()
             db.close()
+            try:
+                await msg.delete()
+            except (discord.Forbidden, discord.HTTPException):
+                pass
             if "Duplicate" in str(e):
                 embed = discord.Embed(
                     title="❌ Préfixe déjà utilisé",
@@ -77,7 +85,9 @@ async def register(bot):
                     color=discord.Color.red()
                 )
             else:
-                embed = discord.Embed(title="❌ Erreur", description=str(e), color=discord.Color.red())
+                import logging
+                logging.getLogger(__name__).exception("Could not create RP character")
+                embed = discord.Embed(title="❌ Erreur", description="Une erreur interne est survenue. Réessaie plus tard.", color=discord.Color.red())
             set_bot_footer(embed, interaction)
             await interaction.edit_original_response(embed=embed)
             return

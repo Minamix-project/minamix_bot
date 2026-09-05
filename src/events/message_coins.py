@@ -3,18 +3,17 @@ import random
 import logging
 import discord
 from discord import Message
-from src.utils.wallet import modify_user_balance
+from src.utils.wallet import claim_message_reward
 from src.utils.reactions import handle as _react
 from src.utils.economy_config import get_guild_economy_config
 from src.config import GUILD_IDS
 
-_last_gain: dict[tuple[int, int], float] = {}
-_last_content: dict[tuple[int, int], str] = {}
 _last_seen_update: dict[tuple[int, int], float] = {}
 COOLDOWN = 60
 SEEN_DEBOUNCE = 300
 MIN_LENGTH = 5
 logger = logging.getLogger(__name__)
+_last_cache_prune = 0.0
 
 _ignored_channels_cache: dict[int, tuple[float, set[int]]] = {}
 _IGNORED_CACHE_TTL = 60
@@ -104,23 +103,15 @@ async def register(bot):
                 if db is not None:
                     db.close()
 
-        key = (message.guild.id, message.author.id)
-
-        if now - _last_gain.get(key, 0) < COOLDOWN:
-            return
-
         content = message.content or ""
         if len(content.strip()) < MIN_LENGTH:
             return
 
-        if _is_low_effort(content) or content == _last_content.get(key):
+        if _is_low_effort(content):
             return
 
         if message.channel.id in await _get_ignored_channels(message.guild.id):
             return
-
-        _last_gain[key] = now
-        _last_content[key] = content
 
         config = await get_guild_economy_config(message.guild.id)
         gain = (
@@ -133,9 +124,19 @@ async def register(bot):
         try:
             from src.utils.db import get_db_connection
             db = await get_db_connection()
-            await modify_user_balance(db, message.guild.id, message.author.id, gain, "add", type_="message")
+            await claim_message_reward(
+                db, message.guild.id, message.author.id, content, gain, int(now), COOLDOWN
+            )
         except Exception:
             logger.exception("Message reward failed guild=%s user=%s", message.guild.id, message.author.id)
         finally:
             if db is not None:
                 db.close()
+
+        global _last_cache_prune
+        if now - _last_cache_prune >= 600:
+            cutoff = now - 3600
+            for key, seen_at in list(_last_seen_update.items()):
+                if seen_at < cutoff:
+                    _last_seen_update.pop(key, None)
+            _last_cache_prune = now

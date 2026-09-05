@@ -1,4 +1,5 @@
 import discord
+import logging
 from discord import Interaction, Member, app_commands
 
 from src.utils.db import get_db_connection
@@ -155,7 +156,7 @@ async def register(bot):
                         )
                     except (discord.Forbidden, discord.HTTPException):
                         pass
-                print(f"[GIVEITEM] Failure for {user.id}: {exc}")
+                logging.getLogger(__name__).exception("Give-item failure for user=%s", user.id)
                 await interaction.edit_original_response(
                     content="❌ L’attribution a échoué. Aucun coin n’a été retiré."
                 )

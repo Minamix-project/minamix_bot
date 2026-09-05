@@ -1,7 +1,10 @@
 import re
+import logging
 from pathlib import Path
 
 from src.core.schema_migrations import run_schema_migrations
+
+logger = logging.getLogger(__name__)
 
 _LEGACY_MODEL_FILES = {"boutique-model.sql", "solde-model.sql", "users-model.sql"}
 
@@ -47,7 +50,7 @@ async def _run_migrations(db):
         if (await cursor.fetchone())[0] == 0:
             await cursor.execute(sql)
             await db.commit()
-            print(f"[MIGRATION] Added {table}.{column}")
+            logger.info("Added migration column %s.%s", table, column)
 
     # Make discoveries global: remove guild_id if it is still present.
     await cursor.execute(
@@ -65,7 +68,7 @@ async def _run_migrations(db):
         await cursor.execute("ALTER TABLE discoveries DROP COLUMN guild_id")
         await cursor.execute("ALTER TABLE discoveries ADD PRIMARY KEY (user_id, egg_key)")
         await db.commit()
-        print("[MIGRATION] Made discoveries global (removed guild_id)")
+        logger.info("Made discoveries global (removed guild_id)")
 
     await cursor.close()
 
@@ -111,7 +114,7 @@ async def _migrate_economy_per_guild(db):
 async def init_db(db):
     model_dir = Path("src/model")
     if not model_dir.exists():
-        print("[WARN] Directory 'src/model/' not found.")
+        logger.warning("Directory 'src/model/' not found")
         return
 
     cursor = await db.cursor()
@@ -127,13 +130,13 @@ async def init_db(db):
             re.IGNORECASE,
         )
         if table_match and await _table_exists(cursor, table_match.group(1)):
-            print(f"[SQL] {sql_file} (already exists)")
+            logger.info("SQL schema already exists: %s", sql_file)
             continue
         try:
             await cursor.execute(sql)
-            print(f"[SQL] {sql_file}")
-        except Exception as e:
-            print(f"[SQL ERROR] {sql_file}: {e}")
+            logger.info("Applied SQL schema: %s", sql_file)
+        except Exception:
+            logger.exception("Could not apply SQL schema: %s", sql_file)
             raise
     await cursor.close()
 

@@ -1,4 +1,6 @@
 import discord
+import time
+import logging
 from discord import Message, RawReactionActionEvent
 from src.config import GUILD_IDS
 from src.utils.rp import get_prefix_cache
@@ -6,7 +8,9 @@ from src.utils.rp import get_prefix_cache
 _webhook_cache: dict[int, discord.Webhook] = {}
 
 # message_id -> user_id : tracks webhook messages sent by characters this session
-_rp_messages: dict[int, int] = {}
+_rp_messages: dict[int, tuple[int, float]] = {}
+_RP_MESSAGE_TTL = 3600
+logger = logging.getLogger(__name__)
 
 
 async def _get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook:
@@ -27,6 +31,10 @@ async def _get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhoo
 async def register(bot):
     @bot.listen("on_message")
     async def on_message_rp(message: Message):
+        cutoff = time.time() - _RP_MESSAGE_TTL
+        for message_id, (_owner_id, created_at) in list(_rp_messages.items()):
+            if created_at < cutoff:
+                _rp_messages.pop(message_id, None)
         if message.author.bot:
             return
         if message.guild is None or message.guild.id not in GUILD_IDS:
@@ -72,9 +80,9 @@ async def register(bot):
                 avatar_url=image_url,
                 wait=True,
             )
-            _rp_messages[msg.id] = owner_id
-        except Exception as e:
-            print(f"[RP] Webhook error: {e}")
+            _rp_messages[msg.id] = (owner_id, time.time())
+        except Exception:
+            logger.exception("RP webhook error")
 
     @bot.listen("on_raw_reaction_add")
     async def on_reaction_rp_delete(payload: RawReactionActionEvent):
@@ -82,7 +90,7 @@ async def register(bot):
             return
         if payload.message_id not in _rp_messages:
             return
-        if payload.user_id != _rp_messages[payload.message_id]:
+        if payload.user_id != _rp_messages[payload.message_id][0]:
             return
 
         channel = bot.get_channel(payload.channel_id)

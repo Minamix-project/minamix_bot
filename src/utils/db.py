@@ -1,9 +1,11 @@
 import os
+import logging
 
 import aiomysql
 
 
 _pool: aiomysql.Pool | None = None
+logger = logging.getLogger(__name__)
 
 
 class PooledConnection:
@@ -45,7 +47,7 @@ async def create_db_pool() -> aiomysql.Pool:
             pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SECONDS", 1800)),
             connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", 10)),
         )
-        print(f"[DB] MySQL pool ready ({_pool.minsize}-{_pool.maxsize} connections)")
+        logger.info("MySQL pool ready (%s-%s connections)", _pool.minsize, _pool.maxsize)
     return _pool
 
 
@@ -62,4 +64,4 @@ async def close_db_pool() -> None:
         _pool.close()
         await _pool.wait_closed()
         _pool = None
-        print("[DB] MySQL pool closed")
+        logger.info("MySQL pool closed")

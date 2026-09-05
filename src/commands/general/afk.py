@@ -1,6 +1,6 @@
 import discord
 from discord import Interaction
-from datetime import datetime
+from datetime import datetime, timezone
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
@@ -68,6 +68,10 @@ class _AfkDatesModal(discord.ui.Modal, title="Définir la période d'absence"):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
+        if start and end and end < start:
+            await interaction.response.send_message("❌ La fin doit être postérieure au début.", ephemeral=True)
+            return
+
         member = interaction.user
         original_nick = member.nick or member.name
 
@@ -88,8 +92,8 @@ class _AfkDatesModal(discord.ui.Modal, title="Définir la période d'absence"):
             "ON DUPLICATE KEY UPDATE reason=%s, original_nick=%s, start_time=%s, end_time=%s",
             (
                 member.id, interaction.guild.id, original_nick, self.reason,
-                start or datetime.now(), end,
-                self.reason, original_nick, start or datetime.now(), end,
+                start or datetime.now(timezone.utc).replace(tzinfo=None), end,
+                self.reason, original_nick, start or datetime.now(timezone.utc).replace(tzinfo=None), end,
             )
         )
         await db.commit()

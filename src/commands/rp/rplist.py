@@ -1,4 +1,5 @@
 import discord
+import logging
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
@@ -58,7 +59,7 @@ async def register(bot):
             try:
                 view.message = await interaction.original_response()
             except discord.HTTPException as exc:
-                print(f"[RPLIST] Could not fetch pagination message: {exc}")
+                logging.getLogger(__name__).warning("Could not fetch RP pagination message: %s", exc)
         else:
             await interaction.response.send_message(
                 embed=view.current_embed(), ephemeral=True

@@ -75,7 +75,7 @@ services:
     image: mysql:8.4.8
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:-backup-restore-test}
+      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:?BACKUP_TEST_ROOT_PASSWORD must be set}
     tmpfs:
       - /var/lib/mysql
     healthcheck:
@@ -89,7 +89,7 @@ services:
     restart: unless-stopped
     environment:
       DB_NAME: ${DB_NAME}
-      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:-backup-restore-test}
+      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:?BACKUP_TEST_ROOT_PASSWORD must be set}
       BACKUP_TEST_INTERVAL_SECONDS: ${BACKUP_TEST_INTERVAL_SECONDS:-86400}
     depends_on:
       backup-test-db:

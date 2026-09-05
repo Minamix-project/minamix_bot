@@ -1,12 +1,15 @@
 import importlib
 import asyncio
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 async def load_modules(bot, directory: str, label: str):
     base = Path(directory)
     if not base.exists():
-        print(f"[WARN] Directory '{directory}' not found.")
+        logger.warning("Directory '%s' not found", directory)
         return
 
     for path in sorted(base.rglob("*.py")):
@@ -21,7 +24,7 @@ async def load_modules(bot, directory: str, label: str):
             if hasattr(module, "register"):
                 fn = module.register
                 await fn(bot) if asyncio.iscoroutinefunction(fn) else fn(bot)
-                print(f"[{label}] {module_name}")
-        except Exception as e:
-            print(f"[ERROR] {module_name}: {e}")
+                logger.info("[%s] %s", label, module_name)
+        except Exception:
+            logger.exception("Could not load %s", module_name)
             raise

@@ -18,6 +18,8 @@ from src.utils.permissions import ADMIN_COMMANDS
 from src.utils.audit import record_admin_action
 from src.utils.error_reporting import report_error
 
+logger = logging.getLogger(__name__)
+
 
 def run_bot():
     asyncio.run(_main())
@@ -105,6 +107,7 @@ async def _main():
     bot.tree.interaction_check = guild_only
 
     _last_notified_backup_test = {"tested_at": None}
+    _ready_handled = False
     backup_test_status_file = Path("backup_test_status/last_restore_test.json")
 
     @tasks.loop(hours=1)
@@ -153,8 +156,8 @@ async def _main():
         if command.name in ADMIN_COMMANDS and interaction.guild_id:
             try:
                 await record_admin_action(interaction.guild_id, interaction.user.id, command.name)
-            except Exception as exc:
-                print(f"[AUDIT] {exc}")
+            except Exception:
+                logger.exception("Could not record administrative audit action")
 
     @bot.event
     async def on_message(message: discord.Message):
@@ -164,18 +167,22 @@ async def _main():
 
     @bot.event
     async def on_ready():
-        print(f"Connected: {bot.user}")
+        nonlocal _ready_handled
+        logger.info("Connected: %s", bot.user)
+        if _ready_handled:
+            return
         try:
             for guild_id in GUILD_IDS:
                 guild = discord.Object(id=guild_id)
                 bot.tree.copy_global_to(guild=guild)
                 synced = await bot.tree.sync(guild=guild)
-                print(f"[SYNC] {len(synced)} commands -> {guild_id}")
+                logger.info("Synced %s commands -> %s", len(synced), guild_id)
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
             await send_deployment_logs()
-        except Exception as e:
-            print(f"[SYNC ERROR] {e}")
+            _ready_handled = True
+        except Exception:
+            logger.exception("Command synchronization failed")
 
         if not check_backup_test_status.is_running():
             check_backup_test_status.start()

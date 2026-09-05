@@ -59,7 +59,7 @@ bot running.
 | `BACKUP_INTERVAL_SECONDS` | no | `21600` | Backup interval |
 | `BACKUP_RETENTION_DAYS` | no | `14` | Backup retention period |
 | `BACKUP_TEST_INTERVAL_SECONDS` | no | `86400` | Restore-test interval |
-| `BACKUP_TEST_ROOT_PASSWORD` | no | internal default | Temporary restore database password |
+| `BACKUP_TEST_ROOT_PASSWORD` | yes when backup tests are enabled | — | Temporary restore database password |
 | `LOG_LEVEL` | no | `INFO` | Python log level |
 
 Variables use `NAME=value` syntax, never `NAME: value`. Use long, distinct
@@ -69,7 +69,7 @@ passwords for `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and
 ## Permissions
 
 Administrative commands require **Manage Server** or **Administrator**. RP
-RP management commands use the same **Manage Server** or **Administrator**
+management commands use the same **Manage Server** or **Administrator**
 permission. These rules are enforced both by Discord command visibility and by
 the bot at runtime.
 

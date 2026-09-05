@@ -63,10 +63,12 @@ async def register(bot):
             set_bot_footer(embed, interaction)
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        except Exception as e:
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Could not add shop item")
             embed = discord.Embed(
                 title="❌ Erreur",
-                description=f"Une erreur s'est produite : {e}",
+                description="Une erreur interne est survenue. Réessaie plus tard.",
                 color=discord.Color.red()
             )
             set_bot_footer(embed, interaction)

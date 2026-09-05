@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from urllib.request import Request, urlopen
 
 import discord
@@ -21,7 +22,7 @@ async def register(bot):
         try:
             releases = await asyncio.to_thread(_fetch_releases)
         except Exception as exc:
-            print(f"[CHANGELOG] {exc}")
+            logging.getLogger(__name__).warning("Could not fetch changelog: %s", exc)
             await interaction.followup.send("❌ Impossible de charger les releases GitHub.", ephemeral=True)
             return
         if not releases:
