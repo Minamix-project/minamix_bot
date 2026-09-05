@@ -3,7 +3,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache
+from src.utils.rp import invalidate_cache, normalize_discord_image_url
 
 
 async def register(bot):
@@ -59,7 +59,7 @@ async def register(bot):
         sheet_embed.add_field(name="Préfixe", value=f"`{prefix}`", inline=True)
 
         msg = await rp_channel.send(embed=sheet_embed, file=file)
-        stable_url = msg.attachments[0].url if msg.attachments else image.url
+        stable_url = normalize_discord_image_url(msg.attachments[0].url if msg.attachments else image.url)
 
         db = await get_db_connection()
         cursor = await db.cursor()

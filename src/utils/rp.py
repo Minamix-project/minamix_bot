@@ -1,4 +1,14 @@
+from urllib.parse import urlsplit, urlunsplit
+
 from src.utils.db import get_db_connection
+
+
+def normalize_discord_image_url(url: str) -> str:
+    """Remove expiring signature parameters from Discord attachment CDN URLs."""
+    parts = urlsplit(url)
+    if parts.hostname in {"cdn.discordapp.com", "media.discordapp.net"} and parts.path.startswith("/attachments/"):
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    return url
 
 # guild_id -> {prefix: (char_id, user_id, name, image_url)}
 _prefix_cache: dict[int, dict[str, tuple]] = {}

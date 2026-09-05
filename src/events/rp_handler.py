@@ -3,7 +3,7 @@ import time
 import logging
 from discord import Message, RawReactionActionEvent
 from src.config import GUILD_IDS
-from src.utils.rp import get_prefix_cache
+from src.utils.rp import get_prefix_cache, normalize_discord_image_url
 
 _webhook_cache: dict[int, discord.Webhook] = {}
 
@@ -77,7 +77,7 @@ async def register(bot):
             msg = await webhook.send(
                 content=spoken_text,
                 username=char_name,
-                avatar_url=image_url,
+                avatar_url=normalize_discord_image_url(image_url),
                 wait=True,
             )
             _rp_messages[msg.id] = (owner_id, time.time())
