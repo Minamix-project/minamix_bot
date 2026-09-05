@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from src.core.schema_migrations import run_schema_migrations
+
 
 # Column migrations: (table, column, ALTER statement)
 _COLUMN_MIGRATIONS = [
@@ -92,5 +94,6 @@ async def init_db(db):
             print(f"[ERREUR SQL] {sql_file}: {e}")
     await cursor.close()
 
+    await run_schema_migrations(db)
     await _run_migrations(db)
     await _migrate_economy_per_guild(db)

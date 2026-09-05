@@ -26,3 +26,4 @@ Thumbs.db
 # Logs
 *.log
 backups/
+backup_test_status/

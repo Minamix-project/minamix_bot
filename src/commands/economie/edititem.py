@@ -1,6 +1,6 @@
 from discord import Interaction, app_commands
 import discord
-from src.utils.shop import get_shop_items
+from src.utils.shop import get_shop_items, item_autocomplete
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
 from src.utils.format import format_amount
@@ -12,7 +12,7 @@ async def register(bot):
         description="Modifier un article de la boutique (Admin seulement)"
     )
     @app_commands.describe(
-        numero="Numéro de l'article affiché dans /shop",
+        numero="Article à modifier",
         prix="Nouveau prix en coins",
         nom="Nouveau nom affiché",
         description="Nouvelle description",
@@ -22,9 +22,10 @@ async def register(bot):
         app_commands.Choice(name="Non", value=0),
         app_commands.Choice(name="Oui", value=1),
     ])
+    @app_commands.autocomplete(numero=item_autocomplete)
     async def edititem(
         interaction: Interaction,
-        numero: int,
+        numero: str,
         prix: int = None,
         nom: str = None,
         description: str = None,
@@ -38,7 +39,12 @@ async def register(bot):
 
         items = await get_shop_items(interaction.guild_id)
 
-        if numero < 1 or numero > len(items):
+        try:
+            numero_int = int(numero)
+        except ValueError:
+            numero_int = -1
+
+        if numero_int < 1 or numero_int > len(items):
             embed = discord.Embed(
                 title="❌ Numéro invalide",
                 description=f"Il n'y a que **{len(items)}** article(s) dans la boutique.",
@@ -48,7 +54,8 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        actual_id, role_id, old_prix, old_nom, old_desc, old_excl = items[numero - 1]
+        actual_id, role_id, old_prix, old_nom, old_desc, old_excl = items[numero_int - 1]
+        numero = numero_int
 
         if prix is None and nom is None and description is None and exclusif is None:
             embed = discord.Embed(

@@ -4,6 +4,8 @@ from discord.ui import Button
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
+from src.utils.transactions import record_transaction
+from src.utils.format import format_amount
 
 
 class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
@@ -29,10 +31,21 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
+            "SELECT COUNT(*), COALESCE(SUM(balance), 0) FROM guild_wallets WHERE guild_id = %s AND balance > 0",
+            (interaction.guild_id,),
+        )
+        affected_count, affected_total = await cursor.fetchone()
+        await cursor.close()
+        db.close()
+
         embed = discord.Embed(
             title="🚨 Dernière chance",
             description=(
-                "Tu es sur le point de **remettre à zéro le solde de tous les membres**.\n\n"
+                f"Tu es sur le point de **remettre à zéro le solde de {affected_count} membre(s)**, "
+                f"représentant **{format_amount(affected_total)}💰** au total.\n\n"
                 "Cette action est **irréversible**."
             ),
             color=discord.Color.dark_red(),
@@ -45,13 +58,28 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
 
         async def yes_callback(inter: Interaction):
             db = await get_db_connection()
-            cursor = await db.cursor()
-            await cursor.execute("UPDATE guild_wallets SET balance = 0 WHERE guild_id = %s", (inter.guild_id,))
-            count = cursor.rowcount
-            await cursor.execute("UPDATE guild_work_cooldowns SET last_work = 0 WHERE guild_id = %s", (inter.guild_id,))
-            await db.commit()
-            await cursor.close()
-            db.close()
+            try:
+                await db.begin()
+                async with db.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT user_id, balance FROM guild_wallets WHERE guild_id = %s AND balance > 0 FOR UPDATE",
+                        (inter.guild_id,),
+                    )
+                    rows = await cursor.fetchall()
+                    for user_id, balance in rows:
+                        await record_transaction(
+                            db, inter.guild_id, user_id, "reset_admin",
+                            -balance, 0, detail=f"Reset global par {inter.user}",
+                        )
+                    await cursor.execute("UPDATE guild_wallets SET balance = 0 WHERE guild_id = %s", (inter.guild_id,))
+                    count = cursor.rowcount
+                    await cursor.execute("UPDATE guild_work_cooldowns SET last_work = 0 WHERE guild_id = %s", (inter.guild_id,))
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+            finally:
+                db.close()
 
             result_embed = discord.Embed(
                 title="✅ Reset effectué",

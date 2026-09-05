@@ -1,8 +1,10 @@
 import os
 import asyncio
+import json
+from pathlib import Path
 from dotenv import load_dotenv
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
 from src.config import GUILD_IDS
@@ -11,6 +13,7 @@ from src.core.loader import load_modules
 from src.utils.db import close_db_pool, create_db_pool, get_db_connection
 from src.utils.permissions import ADMIN_COMMANDS, configure_command_permissions
 from src.utils.audit import record_admin_action
+from src.utils.error_reporting import report_error
 
 
 def run_bot():
@@ -50,13 +53,24 @@ async def _main():
         if isinstance(error, app_commands.CheckFailure):
             message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
         else:
-            print(f"[ERREUR COMMANDE] {interaction.command}: {error}")
-            message = "❌ Une erreur est survenue pendant l'exécution de cette commande."
+            command_name = interaction.command.name if interaction.command else "inconnue"
+            ref = await report_error(
+                bot, guild_ids=interaction.guild_id, source=f"/{command_name}",
+                error=error, user=interaction.user,
+            )
+            message = f"❌ Une erreur est survenue pendant l'exécution de cette commande. Référence : `{ref}`"
 
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)
         else:
             await interaction.response.send_message(message, ephemeral=True)
+
+    @bot.event
+    async def on_error(event_method, *args, **kwargs):
+        import sys
+        error = sys.exc_info()[1]
+        guild_id = next((getattr(getattr(a, "guild", None), "id", None) for a in args if getattr(a, "guild", None)), None)
+        await report_error(bot, guild_ids=guild_id if guild_id is not None else GUILD_IDS, source=f"event:{event_method}", error=error)
 
     async def send_deployment_logs() -> None:
         if os.getenv("DEPLOY_NOTIFICATION") != "1":
@@ -83,6 +97,50 @@ async def _main():
             await channel.send(embed=embed)
 
     bot.tree.interaction_check = guild_only
+
+    _last_notified_backup_test = {"tested_at": None}
+    backup_test_status_file = Path("backup_test_status/last_restore_test.json")
+
+    @tasks.loop(hours=1)
+    async def check_backup_test_status():
+        if not backup_test_status_file.exists():
+            return
+        try:
+            status = json.loads(backup_test_status_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+
+        if status.get("status") != "fail":
+            return
+        if status.get("tested_at") == _last_notified_backup_test["tested_at"]:
+            return
+        _last_notified_backup_test["tested_at"] = status.get("tested_at")
+
+        for guild_id in GUILD_IDS:
+            db = await get_db_connection()
+            try:
+                async with db.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'error_logs_channel'",
+                        (guild_id,),
+                    )
+                    row = await cursor.fetchone()
+            finally:
+                db.close()
+            if not row:
+                continue
+            channel = bot.get_channel(int(row[0]))
+            if channel is None:
+                continue
+            embed = discord.Embed(
+                title="🚨 Test de restauration de sauvegarde échoué",
+                description=f"Fichier : `{status.get('file') or '—'}`\n{status.get('detail', '')}",
+                color=discord.Color.red(),
+            )
+            try:
+                await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
 
     @bot.event
     async def on_app_command_completion(interaction, command):
@@ -112,6 +170,9 @@ async def _main():
             await send_deployment_logs()
         except Exception as e:
             print(f"[ERREUR SYNC] {e}")
+
+        if not check_backup_test_status.is_running():
+            check_backup_test_status.start()
 
     await load_modules(bot, "src/events", "EVENT")
     await load_modules(bot, "src/commands", "CMD")
