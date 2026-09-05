@@ -3,7 +3,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache
+from src.utils.rp import invalidate_cache, normalize_discord_image_url, prefixes_too_close
 
 
 async def register(bot):
@@ -59,15 +59,25 @@ async def register(bot):
         sheet_embed.add_field(name="Préfixe", value=f"`{prefix}`", inline=True)
 
         msg = await rp_channel.send(embed=sheet_embed, file=file)
-        stable_url = msg.attachments[0].url if msg.attachments else image.url
+        stable_url = normalize_discord_image_url(msg.attachments[0].url if msg.attachments else image.url)
 
         db = await get_db_connection()
         cursor = await db.cursor()
         try:
             await cursor.execute(
-                "INSERT INTO rp_characters (guild_id, user_id, name, prefix, image_url) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (interaction.guild.id, user.id, name, prefix, stable_url)
+                "SELECT prefix FROM rp_characters WHERE guild_id = %s",
+                (interaction.guild.id,),
+            )
+            if any(prefixes_too_close(prefix, row[0]) for row in await cursor.fetchall()):
+                await cursor.close()
+                db.close()
+                await msg.delete()
+                await interaction.edit_original_response(content="❌ Ce préfixe est trop proche d’un préfixe existant.")
+                return
+            await cursor.execute(
+                "INSERT INTO rp_characters (guild_id, user_id, name, prefix, image_url, sheet_channel_id, sheet_message_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (interaction.guild.id, user.id, name, prefix, stable_url, rp_channel.id, msg.id)
             )
             await db.commit()
             char_id = cursor.lastrowid

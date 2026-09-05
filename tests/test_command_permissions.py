@@ -12,7 +12,7 @@ def test_registered_command_permissions():
     asyncio.run(load_modules(bot, "src/commands", "CMD"))
     registered = {command.name: command for command in bot.tree.get_commands()}
 
-    assert len(registered) == 51
+    assert len(registered) == 52
     assert not ADMIN_COMMANDS - registered.keys()
 
     for name in ADMIN_COMMANDS:

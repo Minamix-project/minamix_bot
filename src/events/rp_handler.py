@@ -3,7 +3,7 @@ import time
 import logging
 from discord import Message, RawReactionActionEvent
 from src.config import GUILD_IDS
-from src.utils.rp import get_prefix_cache
+from src.utils.rp import get_prefix_cache, normalize_discord_image_url
 
 _webhook_cache: dict[int, discord.Webhook] = {}
 
@@ -48,7 +48,8 @@ async def register(bot):
         matched_char = None
         matched_prefix = None
 
-        for prefix, char_data in cache.items():
+        for prefix in sorted(cache, key=len, reverse=True):
+            char_data = cache[prefix]
             if content.startswith(prefix):
                 char_id, user_id, char_name, image_url = char_data
                 if message.author.id == user_id:
@@ -64,11 +65,6 @@ async def register(bot):
         if not spoken_text:
             return
 
-        try:
-            await message.delete()
-        except discord.Forbidden:
-            pass
-
         if not isinstance(message.channel, discord.TextChannel):
             return
 
@@ -77,10 +73,15 @@ async def register(bot):
             msg = await webhook.send(
                 content=spoken_text,
                 username=char_name,
-                avatar_url=image_url,
+                avatar_url=normalize_discord_image_url(image_url),
+                allowed_mentions=discord.AllowedMentions.none(),
                 wait=True,
             )
             _rp_messages[msg.id] = (owner_id, time.time())
+            try:
+                await message.delete()
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Could not delete RP source message %s", message.id)
         except Exception:
             logger.exception("RP webhook error")
 

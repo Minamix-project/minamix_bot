@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache
+from src.utils.rp import invalidate_cache, normalize_discord_image_url
 from src.utils.views import ExpiringView
 
 
@@ -68,13 +68,13 @@ async def register(bot):
                 content=f"*Mise à jour de l'image de **{char_name}** :*",
                 file=file
             )
-            stable_url = msg.attachments[0].url if msg.attachments else image.url
+            stable_url = normalize_discord_image_url(msg.attachments[0].url if msg.attachments else image.url)
 
             db2 = await get_db_connection()
             cursor2 = await db2.cursor()
             await cursor2.execute(
-                "UPDATE rp_characters SET image_url = %s WHERE id = %s",
-                (stable_url, char_id)
+                "UPDATE rp_characters SET image_url = %s, sheet_channel_id = %s, sheet_message_id = %s WHERE id = %s",
+                (stable_url, rp_channel.id, msg.id, char_id)
             )
             await db2.commit()
             await cursor2.close()

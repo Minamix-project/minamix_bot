@@ -150,6 +150,7 @@ receive a short reference and can be sent to the channel configured with
 | `/rpedit <user>` | Edit a name or prefix — admin |
 | `/rpimage <user> <image>` | Change an image — admin |
 | `/rpdelete <user>` | Delete a character — admin |
+| `/rphealth` | Check RP image references — admin |
 | `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |

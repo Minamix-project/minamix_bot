@@ -155,7 +155,17 @@ async def _main():
     async def on_app_command_completion(interaction, command):
         if command.name in ADMIN_COMMANDS and interaction.guild_id:
             try:
-                await record_admin_action(interaction.guild_id, interaction.user.id, command.name)
+                detail = None
+                namespace = getattr(interaction, "namespace", None)
+                if namespace is not None:
+                    values = vars(namespace)
+                    safe_values = {
+                        key: getattr(value, "id", value)
+                        for key, value in values.items()
+                        if key not in {"image", "attachment"}
+                    }
+                    detail = ", ".join(f"{key}={value}" for key, value in safe_values.items()) or None
+                await record_admin_action(interaction.guild_id, interaction.user.id, command.name, detail)
             except Exception:
                 logger.exception("Could not record administrative audit action")
 
