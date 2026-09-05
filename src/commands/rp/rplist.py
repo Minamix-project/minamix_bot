@@ -2,6 +2,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
+from src.utils.pagination import PaginationView
 
 
 async def register(bot):
@@ -31,20 +32,26 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title=f"🎭 Personnages de {target.display_name} ({len(rows)})",
-            color=discord.Color.blurple()
-        )
-        embed.set_thumbnail(url=target.display_avatar.url)
+        total_pages = (len(rows) + 9) // 10
 
-        page = max(page, 1)
-        start = (page - 1) * 10
-        for name, prefix, image_url, created_at in rows[start:start + 10]:
-            embed.add_field(
-                name=name,
-                value=f"Préfixe : `{prefix}`\n[Image]({image_url})\nCréé le <t:{int(created_at.timestamp())}:d>",
-                inline=True
+        def render(current_page: int) -> discord.Embed:
+            embed = discord.Embed(
+                title=f"🎭 Personnages de {target.display_name} ({len(rows)})",
+                color=discord.Color.blurple(),
             )
+            embed.set_thumbnail(url=target.display_avatar.url)
+            start = (current_page - 1) * 10
+            for name, prefix, image_url, created_at in rows[start:start + 10]:
+                embed.add_field(
+                    name=name,
+                    value=f"Préfixe : `{prefix}`\n[Image]({image_url})\nCréé le <t:{int(created_at.timestamp())}:d>",
+                    inline=True,
+                )
+            set_bot_footer(embed, interaction)
+            return embed
 
-        set_bot_footer(embed, interaction)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        view = PaginationView(interaction.user.id, total_pages, render, page)
+        await interaction.response.send_message(
+            embed=view.current_embed(), view=view if total_pages > 1 else None, ephemeral=True
+        )
+        view.message = await interaction.original_response()

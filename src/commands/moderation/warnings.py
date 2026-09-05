@@ -2,6 +2,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
+from src.utils.pagination import PaginationView
 
 
 async def register(bot):
@@ -37,25 +38,27 @@ async def register(bot):
             await interaction.followup.send(embed=embed)
             return
 
-        embed = discord.Embed(
-            title=f"📋 Avertissements — {user.display_name} ({len(rows)})",
-            color=discord.Color.orange()
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
+        total_pages = (len(rows) + 9) // 10
 
-        page = max(page, 1)
-        start = (page - 1) * 10
-        for num, (mod_id, reason, created_at) in enumerate(rows[start:start + 10], start=start + 1):
-            mod = interaction.guild.get_member(mod_id)
-            mod_name = mod.display_name if mod else f"ID {mod_id}"
-            embed.add_field(
-                name=f"#{num} — <t:{int(created_at.timestamp())}:d> — par {mod_name}",
-                value=reason,
-                inline=False
+        def render(current_page: int) -> discord.Embed:
+            embed = discord.Embed(
+                title=f"📋 Avertissements — {user.display_name} ({len(rows)})",
+                color=discord.Color.orange(),
             )
+            embed.set_thumbnail(url=user.display_avatar.url)
+            start = (current_page - 1) * 10
+            for num, (mod_id, reason, created_at) in enumerate(rows[start:start + 10], start=start + 1):
+                mod = interaction.guild.get_member(mod_id)
+                mod_name = mod.display_name if mod else f"ID {mod_id}"
+                embed.add_field(
+                    name=f"#{num} — <t:{int(created_at.timestamp())}:d> — par {mod_name}",
+                    value=reason,
+                    inline=False,
+                )
+            set_bot_footer(embed, interaction)
+            return embed
 
-        if len(rows) > 10:
-            embed.set_footer(text=f"Affichage des 10 derniers sur {len(rows)} au total.")
-
-        set_bot_footer(embed, interaction)
-        await interaction.followup.send(embed=embed)
+        view = PaginationView(interaction.user.id, total_pages, render, page)
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view if total_pages > 1 else None, wait=True
+        )

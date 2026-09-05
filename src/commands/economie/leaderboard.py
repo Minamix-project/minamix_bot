@@ -3,6 +3,7 @@ import discord
 from src.utils.db import get_db_connection
 from src.utils.format import format_amount
 from src.utils.embed import set_bot_footer
+from src.utils.pagination import PaginationView
 
 
 def _resolve_name(user_id: int) -> str:
@@ -29,25 +30,29 @@ async def register(bot):
             await interaction.followup.send("Aucun utilisateur enregistré.", ephemeral=True)
             return
 
-        page = max(page, 1)
-        rows = rows[(page - 1) * 10:page * 10]
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        lines = []
-        rank = (page - 1) * 10
-        for user_id, balance in rows:
-            if not interaction.guild.get_member(user_id):
-                continue
-            rank += 1
-            prefix = medals.get(rank, f"`#{rank}`")
-            name = _resolve_name(user_id)
-            lines.append(f"{prefix} {name} — **{format_amount(balance)}💰**")
-            if len(lines) == 10:
-                break
+        rows = [row for row in rows if interaction.guild.get_member(row[0])]
+        if not rows:
+            await interaction.followup.send("Aucun membre du serveur n'est classé.", ephemeral=True)
+            return
 
-        embed = Embed(
-            title="🏆 Leaderboard",
-            description="\n".join(lines),
-            color=discord.Color.gold()
+        total_pages = (len(rows) + 9) // 10
+
+        def render(current_page: int) -> Embed:
+            start = (current_page - 1) * 10
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            lines = []
+            for rank, (user_id, balance) in enumerate(rows[start:start + 10], start=start + 1):
+                prefix = medals.get(rank, f"`#{rank}`")
+                lines.append(f"{prefix} {_resolve_name(user_id)} — **{format_amount(balance)}💰**")
+            embed = Embed(
+                title="🏆 Classement des plus riches",
+                description="\n".join(lines),
+                color=discord.Color.gold(),
+            )
+            set_bot_footer(embed, interaction)
+            return embed
+
+        view = PaginationView(interaction.user.id, total_pages, render, page)
+        view.message = await interaction.followup.send(
+            embed=view.current_embed(), view=view if total_pages > 1 else None, wait=True
         )
-        set_bot_footer(embed, interaction)
-        await interaction.followup.send(embed=embed)

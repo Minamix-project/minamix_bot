@@ -1,113 +1,149 @@
+import discord
 from discord import Interaction
 from discord.ui import Select
-import discord
+
 from src.utils.embed import set_bot_footer
-from src.utils.permissions import is_admin
-from src.utils.views import ExpiringView
+from src.utils.permissions import is_admin, is_rp_manager
+
 
 _GENERAL = (
-    "`/afk` — Définir ton statut absent (raison + période)\n"
-    "`/back` — Annuler ton statut absent\n"
-    "`/status` — Voir le statut et les infos du bot\n"
-    "`/changelog` — Voir les dernières releases GitHub"
+    "`/afk` — Signaler une absence et sa durée\n"
+    "`/back` — Mettre fin à ton absence\n"
+    "`/status` — Voir l'état et la version du bot\n"
+    "`/changelog` — Voir les dernières versions"
 )
 
 _ECONOMY = (
-    "`/balance` — Voir votre solde\n"
-    "`/work` — Gagner des coins (cooldown : 1 semaine)\n"
-    "`/shop` — Voir les rôles disponibles à l'achat\n"
-    "`/buy [numéro]` — Acheter un rôle (liste déroulante si numéro omis)\n"
-    "`/leaderboard` — Top 10 des utilisateurs les plus riches\n"
-    "`/discoveries` — Voir tes découvertes secrètes"
+    "`/balance` — Consulter ton solde\n"
+    "`/work` — Gagner des coins (une fois par semaine)\n"
+    "`/shop` — Afficher la boutique du serveur\n"
+    "`/buy [numéro]` — Acheter un rôle\n"
+    "`/leaderboard` — Afficher le classement avec navigation\n"
+    "`/discoveries` — Consulter tes découvertes secrètes"
 )
 
-_ADMIN = (
-    "`/addmoney <user> <montant>` — Ajouter des coins à un utilisateur\n"
-    "`/removemoney <user> <montant>` — Retirer des coins à un utilisateur\n"
-    "`/additem <role> <prix> <nom> [exclusif] [description]` — Ajouter un rôle à la boutique\n"
-    "`/edititem <numéro> [prix] [nom] [description] [exclusif]` — Modifier un article\n"
-    "`/removeitem <numéro>` — Supprimer un article de la boutique\n"
-    "`/giveitem <numéro> <user>` — Donner un article à un utilisateur\n"
-    "`/resetbalances` — Remettre tous les soldes à zéro\n"
-    "`/economystats` — Voir les statistiques de l'économie"
+_RP_PUBLIC = (
+    "`/roll <expression>` — Lancer des dés (`/roll help` pour les exemples)\n"
+    "`/rplist [user]` — Lister des personnages avec navigation\n"
+    "`/rpbourse [user]` — Consulter la bourse Nax d'un personnage"
 )
 
-_RP = (
-    "`/roll <expression>` — Lancer des dés (`/roll help` pour la syntaxe)\n"
-    "`/rpcreate <user> <name> <prefix> <image>` — Créer un personnage RP\n"
-    "`/rpedit <user>` — Modifier nom ou préfixe (sélection + modal)\n"
-    "`/rpimage <user> <image>` — Changer l'image d'un personnage\n"
-    "`/rpdelete <user>` — Supprimer un personnage (sélection)\n"
-    "`/rpbourse [user]` — Voir la bourse Nax d'un personnage\n"
-    "`/addnax <user> <montant>` — Ajouter des Nax à un personnage\n"
-    "`/removenax <user> <montant>` — Retirer des Nax à un personnage\n"
-    "`/rplist [user]` — Lister les personnages d'un utilisateur\n"
-    "`/setrpchannel <channel>` — Définir le channel d'annonce RP"
+_RP_MANAGEMENT = (
+    "`/rpcreate <user> <name> <prefix> <image>` — Créer un personnage\n"
+    "`/rpedit <user>` — Modifier le nom ou le préfixe\n"
+    "`/rpimage <user> <image>` — Changer l'image\n"
+    "`/rpdelete <user>` — Supprimer un personnage"
+)
+
+_ADMIN_ECONOMY = (
+    "`/addmoney <user> <montant>` — Ajouter des coins\n"
+    "`/removemoney <user> <montant>` — Retirer des coins\n"
+    "`/additem <role> <prix> <nom> [...]` — Ajouter un article\n"
+    "`/edititem <numéro> [...]` — Modifier un article\n"
+    "`/removeitem <numéro>` — Supprimer un article\n"
+    "`/giveitem <numéro> <user> [déduire]` — Donner un article\n"
+    "`/addnax <user> <montant>` — Ajouter des Nax\n"
+    "`/removenax <user> <montant>` — Retirer des Nax\n"
+    "`/economystats` — Afficher les statistiques économiques\n"
+    "`/resetbalances` — Remettre les soldes du serveur à zéro"
 )
 
 _MODERATION = (
-    "`/setlogs <channel>` — Définir le channel de logs\n"
-    "`/setafklogs <channel>` — Définir le channel de logs des absences\n"
-    "`/setwarnlogs <channel>` — Définir le channel de logs des warns\n"
-    "`/warn <user> <raison>` — Avertir un membre\n"
-    "`/warnings <user>` — Voir l'historique des warns d'un membre\n"
+    "`/warn <user> <raison>` — Ajouter un avertissement\n"
+    "`/warnings <user>` — Consulter les avertissements avec navigation\n"
     "`/delwarn <user> <numéro>` — Supprimer un avertissement\n"
-    "`/absents` — Liste des membres absents par ordre de date\n"
-    "`/activity <user>` — Voir l'activité d'un membre\n"
-    "`/addantispam <channel>` — Ajouter un channel anti-spam (ban instantané)\n"
-    "`/removeantispam <channel>` — Retirer un channel du mode anti-spam\n"
-    "`/listantispam` — Lister les channels anti-spam actifs\n"
-    "`/config` — Voir les salons configurés\n"
-    "`/servers` — Voir les serveurs autorisés\n"
-    "`/health` — Vérifier Discord et MySQL\n"
-    "`/backupstatus` — Voir le dernier dump SQL"
+    "`/absents` — Lister les membres absents\n"
+    "`/activity <user>` — Consulter l'activité d'un membre\n"
+    "`/addantispam <channel>` — Activer l'antispam dans un salon\n"
+    "`/removeantispam <channel>` — Désactiver l'antispam\n"
+    "`/listantispam` — Lister les salons protégés"
 )
 
+_SYSTEM = (
+    "`/config` — Afficher les salons configurés\n"
+    "`/setlogs <channel>` — Définir les logs généraux\n"
+    "`/setafklogs <channel>` — Définir les logs d'absence\n"
+    "`/setwarnlogs <channel>` — Définir les logs d'avertissement\n"
+    "`/setrpchannel <channel>` — Définir le salon des annonces RP\n"
+    "`/servers` — Afficher les serveurs autorisés\n"
+    "`/health` — Vérifier Discord et MySQL\n"
+    "`/backupstatus` — Vérifier le dernier dump SQL"
+)
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, owner_id: int, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "❌ Lance `/help` toi-même pour consulter les commandes.", ephemeral=True
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except (discord.HTTPException, discord.NotFound):
+                pass
+
+
 async def register(bot):
-    @bot.tree.command(name="help", description="Affiche les commandes du bot.")
+    @bot.tree.command(name="help", description="Afficher les commandes disponibles.")
     async def help(interaction: Interaction):
-        is_admin_user = is_admin(interaction.user)
+        admin = is_admin(interaction.user)
+        rp_manager = is_rp_manager(interaction.user)
 
         options = [
-            discord.SelectOption(label="Général", value="general", description="Commandes générales", emoji="🌐"),
-            discord.SelectOption(label="Économie", value="economy", description="Commandes d'économie", emoji="💰"),
+            discord.SelectOption(label="Pour commencer", value="general", emoji="👋"),
+            discord.SelectOption(label="Économie", value="economy", emoji="💰"),
+            discord.SelectOption(label="Roleplay", value="rp", emoji="🎭"),
         ]
-        options.append(
-            discord.SelectOption(label="Roleplay", value="rp", description="Commandes RP", emoji="🎭")
-        )
-        if is_admin:
-            options.append(
-                discord.SelectOption(label="Administration", value="admin", description="Commandes admin", emoji="🔒")
-            )
-            options.append(
-                discord.SelectOption(label="Modération", value="moderation", description="Commandes de modération", emoji="🛡️")
-            )
+        if rp_manager:
+            options.append(discord.SelectOption(
+                label="Gestion RP", value="rp_management", emoji="📝"
+            ))
+        if admin:
+            options.extend([
+                discord.SelectOption(label="Admin · Économie", value="admin_economy", emoji="🔒"),
+                discord.SelectOption(label="Admin · Modération", value="moderation", emoji="🛡️"),
+                discord.SelectOption(label="Admin · Configuration", value="system", emoji="⚙️"),
+            ])
 
-        select = Select(placeholder="Choisir une catégorie...", options=options)
+        pages = {
+            "general": ("👋 Pour commencer", _GENERAL, discord.Color.blurple()),
+            "economy": ("💰 Économie", _ECONOMY, discord.Color.gold()),
+            "rp": ("🎭 Roleplay", _RP_PUBLIC, discord.Color.purple()),
+            "rp_management": ("📝 Gestion RP", _RP_MANAGEMENT, discord.Color.purple()),
+            "admin_economy": ("🔒 Administration · Économie", _ADMIN_ECONOMY, discord.Color.red()),
+            "moderation": ("🛡️ Administration · Modération", _MODERATION, discord.Color.red()),
+            "system": ("⚙️ Administration · Configuration", _SYSTEM, discord.Color.red()),
+        }
+
+        select = Select(placeholder="Choisis une catégorie…", options=options)
+        view = HelpView(interaction.user.id)
 
         async def callback(inter: Interaction):
-            val = select.values[0]
-            if val == "general":
-                embed = discord.Embed(title="🌐 Général", description=_GENERAL, color=discord.Color.blurple())
-            elif val == "economy":
-                embed = discord.Embed(title="💰 Économie", description=_ECONOMY, color=discord.Color.gold())
-            elif val == "rp":
-                embed = discord.Embed(title="🎭 Roleplay", description=_RP, color=discord.Color.purple())
-            elif val == "admin":
-                embed = discord.Embed(title="🔒 Administration", description=_ADMIN, color=discord.Color.red())
-            else:
-                embed = discord.Embed(title="🛡️ Modération", description=_MODERATION, color=discord.Color.blurple())
+            title, description, color = pages[select.values[0]]
+            embed = discord.Embed(title=title, description=description, color=color)
             set_bot_footer(embed, inter)
-            await inter.response.send_message(embed=embed, ephemeral=True)
+            await inter.response.edit_message(embed=embed, view=view)
 
         select.callback = callback
-        view = ExpiringView()
         view.add_item(select)
 
+        access = "Les catégories administrateur sont affichées selon tes permissions."
         embed = discord.Embed(
-            title="📖 Aide",
-            description="Sélectionne une catégorie pour voir les commandes disponibles.",
-            color=discord.Color.blurple()
+            title="📖 Aide du bot",
+            description=f"Choisis une catégorie ci-dessous.\n{access}",
+            color=discord.Color.blurple(),
         )
         set_bot_footer(embed, interaction)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
