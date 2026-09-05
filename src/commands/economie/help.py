@@ -74,8 +74,7 @@ _SYSTEM = (
     "`/health` — Vérifier Discord et MySQL\n"
     "`/backupstatus` — Vérifier le dernier dump et sa restauration\n"
     "`/audit [...]` — Consulter les actions administratives\n"
-    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques\n"
-    "`/archivelegacytables` — Archiver les anciennes tables (avancé)"
+    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques"
 )
 
 

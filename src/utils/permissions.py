@@ -32,7 +32,7 @@ def rp_only():
     return app_commands.check(lambda interaction: is_rp_manager(interaction.user))
 
 
-ADMIN_COMMANDS = frozenset({"addantispam", "additem", "addmoney", "addnax", "backupstatus", "config", "economystats", "edititem", "giveitem", "listantispam", "removeantispam", "removeitem", "removemoney", "removenax", "resetbalances", "setafklogs", "setlogs", "setrpchannel", "setwarnlogs", "servers", "warn", "warnings", "delwarn", "activity", "absents", "health", "economyconfig", "addecoignore", "removeecoignore", "listecoignore", "audit", "seterrorlogs", "archivelegacytables"})
+ADMIN_COMMANDS = frozenset({"addantispam", "additem", "addmoney", "addnax", "backupstatus", "config", "economystats", "edititem", "giveitem", "listantispam", "removeantispam", "removeitem", "removemoney", "removenax", "resetbalances", "setafklogs", "setlogs", "setrpchannel", "setwarnlogs", "servers", "warn", "warnings", "delwarn", "activity", "absents", "health", "economyconfig", "addecoignore", "removeecoignore", "listecoignore", "audit", "seterrorlogs"})
 RP_MANAGER_COMMANDS = frozenset({"rpcreate", "rpdelete", "rpedit", "rpimage"})
 
 
