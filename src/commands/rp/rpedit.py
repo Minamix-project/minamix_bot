@@ -120,7 +120,7 @@ async def register(bot):
             await inter.response.send_modal(EditModal())
 
         select.callback = on_select
-        view = ExpiringView()
+        view = ExpiringView(owner_id=interaction.user.id)
         view.add_item(select)
 
         embed = discord.Embed(

@@ -28,6 +28,8 @@ A Discord bot with an economy system, shop, moderation tools, ...
    DB_POOL_MIN_SIZE=1
    DB_POOL_MAX_SIZE=10
    DB_POOL_RECYCLE_SECONDS=1800
+   DISCORD_GUILD_IDS=1437105431741730860,1482529716463210506
+   RP_ALLOWED_ROLE_IDS=1437105432291315806,1437105432291315805
    ```
 
 3. Start the bot:
@@ -39,6 +41,7 @@ A Discord bot with an economy system, shop, moderation tools, ...
 MySQL access uses an asynchronous connection pool. These pool settings are
 optional and already use the displayed values by default.
 The database is initialized automatically on first start.
+The guild and RP role lists can be supplied as comma-separated Discord IDs.
 
 ### Bot administration permissions
 
@@ -87,7 +90,14 @@ make deploy    # git pull + rebuild + restart bot only (DB untouched)
 make restart   # restart bot container without rebuilding
 make logs      # follow live logs
 make status    # show container status
+make test      # run the unit tests
+make lint      # run Ruff and compile checks
 ```
+
+Database dumps are created with owner-only permissions and retained for 14 days
+by default (`BACKUP_RETENTION_DAYS`). The `backups/` host directory still
+contains database data and should be stored on an encrypted disk with restricted
+host access.
 
 ## Project Structure
 

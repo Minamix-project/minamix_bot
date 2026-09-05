@@ -1,6 +1,6 @@
 from discord import Interaction, Embed
 from src.utils.db import get_db_connection
-from src.utils.wallet import modify_user_balance
+from src.utils.wallet import claim_work_reward
 from src.utils.format import format_amount
 from src.utils.embed import set_bot_footer
 from src.utils.economy_config import get_guild_economy_config
@@ -71,52 +71,35 @@ async def register(bot):
         cooldown = config["work_cooldown_seconds"]
 
         db = await get_db_connection()
-        cursor = await db.cursor()
         user_id = interaction.user.id
         current_time = int(time.time())
-
-        await cursor.execute("SELECT last_work FROM guild_work_cooldowns WHERE guild_id = %s AND user_id = %s", (interaction.guild_id, user_id))
-        result = (await cursor.fetchone())
-
-        if result:
-            last_work = result[0]
-            if last_work is not None:
-
-                if current_time - last_work < cooldown:
-
-                    remaining = cooldown - (current_time - last_work)
-                    days = remaining // 86400
-                    hours = (remaining % 86400) // 3600
-                    minutes = (remaining % 3600) // 60
-
-                    embed = Embed(
-                        title="⏰ Cooldown actif",
-                        description=f"Tu pourras travailler à nouveau dans **{days}j {hours}h {minutes}min**.",
-                        color=discord.Color.orange()
-                    )
-                    set_bot_footer(embed, interaction)
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
-                    db.close()
-                    return
-        else:
-         
-            await cursor.execute("INSERT INTO guild_work_cooldowns (guild_id, user_id, last_work) VALUES (%s, %s, %s)", (interaction.guild_id, user_id, 0))
-            await db.commit()
-
         gain = random.randint(config["work_gain_min"], config["work_gain_max"])
+        try:
+            new_balance, remaining, credited = await claim_work_reward(
+                db, interaction.guild_id, user_id, gain, current_time, cooldown
+            )
+        finally:
+            db.close()
 
-        new_balance = await modify_user_balance(db, interaction.guild_id, user_id, gain, "add", type_="work")
-
-        await cursor.execute("UPDATE guild_work_cooldowns SET last_work = %s WHERE guild_id = %s AND user_id = %s", (current_time, interaction.guild_id, user_id))
-        await db.commit()
+        if new_balance is None:
+            days = remaining // 86400
+            hours = (remaining % 86400) // 3600
+            minutes = (remaining % 3600) // 60
+            embed = Embed(
+                title="⏰ Cooldown actif",
+                description=f"Tu pourras travailler à nouveau dans **{days}j {hours}h {minutes}min**.",
+                color=discord.Color.orange(),
+            )
+            set_bot_footer(embed, interaction)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
 
         joke = random.choice(JOKES)
 
         embed = Embed(
             title="💼 Travail terminé !",
-            description=f"Tu as gagné **{format_amount(gain)}💰** !\n\n**😄 Blague du jour :**\n_{joke}_\n\n📊 Nouveau solde : **{format_amount(new_balance)}💰**",
+            description=f"Tu as gagné **{format_amount(credited)}💰** !\n\n**😄 Blague du jour :**\n_{joke}_\n\n📊 Nouveau solde : **{format_amount(new_balance)}💰**",
             color=discord.Color.green()
         )
         set_bot_footer(embed, interaction)
         await interaction.response.send_message(embed=embed, ephemeral=False)
-        db.close()

@@ -12,3 +12,10 @@ logs:
 
 status:
 	docker compose ps
+
+test:
+	python -m pytest -q
+
+lint:
+	python -m ruff check .
+	python -m compileall -q main.py src tests

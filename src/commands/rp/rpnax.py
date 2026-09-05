@@ -55,8 +55,8 @@ async def _pick_character(interaction: Interaction, user: Member, montant: int, 
         return
 
     if len(rows) == 1:
-        char_id, char_name, balance = rows[0]
-        await _apply(interaction, user, char_id, char_name, balance, montant, action)
+        char_id, char_name, _balance = rows[0]
+        await _apply(interaction, user, char_id, char_name, montant, action)
         return
 
     options = [
@@ -75,11 +75,11 @@ async def _pick_character(interaction: Interaction, user: Member, montant: int, 
         if not char:
             await inter.response.send_message("❌ Personnage introuvable.", ephemeral=True)
             return
-        _, char_name, balance = char
-        await _apply(inter, user, char_id, char_name, balance, montant, action)
+        _, char_name, _balance = char
+        await _apply(inter, user, char_id, char_name, montant, action)
 
     select.callback = on_select
-    view = ExpiringView()
+    view = ExpiringView(owner_id=interaction.user.id)
     view.add_item(select)
 
     verb = "Ajouter à" if action == "add" else "Retirer à"
@@ -93,29 +93,39 @@ async def _pick_character(interaction: Interaction, user: Member, montant: int, 
     view.message = await interaction.original_response()
 
 
-async def _apply(interaction: Interaction, user: Member, char_id: int, char_name: str, balance: int, montant: int, action: str):
-    if action == "remove" and montant > balance:
-        embed = discord.Embed(
-            title="❌ Solde insuffisant",
-            description=f"**{char_name}** n'a que **{balance:,} {NAX_EMOJI}**".replace(",", " "),
-            color=discord.Color.red()
-        )
-        set_bot_footer(embed, interaction)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-
+async def _apply(interaction: Interaction, user: Member, char_id: int, char_name: str, montant: int, action: str):
     delta = montant if action == "add" else -montant
-    new_balance = balance + delta
-
     db = await get_db_connection()
-    cursor = await db.cursor()
-    await cursor.execute(
-        "UPDATE rp_characters SET nax_balance = %s WHERE id = %s",
-        (new_balance, char_id)
-    )
-    await db.commit()
-    await cursor.close()
-    db.close()
+    try:
+        await db.begin()
+        async with db.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE rp_characters SET nax_balance = nax_balance + %s "
+                "WHERE id = %s AND guild_id = %s AND user_id = %s "
+                "AND nax_balance + %s >= 0",
+                (delta, char_id, interaction.guild_id, user.id, delta),
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                embed = discord.Embed(
+                    title="❌ Opération impossible",
+                    description="Le personnage n'existe plus ou son solde est insuffisant.",
+                    color=discord.Color.red(),
+                )
+                set_bot_footer(embed, interaction)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            await cursor.execute(
+                "SELECT nax_balance FROM rp_characters WHERE id = %s AND guild_id = %s",
+                (char_id, interaction.guild_id),
+            )
+            new_balance = (await cursor.fetchone())[0]
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        db.close()
 
     formatted = f"{montant:,}".replace(",", " ")
     new_fmt = f"{new_balance:,}".replace(",", " ")

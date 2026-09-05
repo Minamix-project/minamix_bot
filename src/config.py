@@ -1,4 +1,32 @@
-GUILD_IDS = [
+import os
+
+
+_DEFAULT_GUILD_IDS = [
     1437105431741730860,
     1482529716463210506,
 ]
+
+
+def _integer_set_from_env(name: str, defaults: list[int]) -> set[int]:
+    raw = os.getenv(name)
+    if not raw:
+        return set(defaults)
+    try:
+        values = {int(value.strip()) for value in raw.split(",") if value.strip()}
+    except ValueError as exc:
+        raise RuntimeError(f"{name} doit contenir uniquement des IDs séparés par des virgules") from exc
+    if not values:
+        raise RuntimeError(f"{name} ne peut pas être vide")
+    return values
+
+
+GUILD_IDS = _integer_set_from_env("DISCORD_GUILD_IDS", _DEFAULT_GUILD_IDS)
+RP_ALLOWED_ROLE_IDS = _integer_set_from_env(
+    "RP_ALLOWED_ROLE_IDS",
+    [
+        1437105432291315806,
+        1437105432291315805,
+        1437105432278728784,
+        1507492860956774633,
+    ],
+)

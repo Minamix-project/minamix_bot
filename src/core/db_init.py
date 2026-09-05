@@ -134,6 +134,7 @@ async def init_db(db):
             print(f"[SQL] {sql_file}")
         except Exception as e:
             print(f"[ERREUR SQL] {sql_file}: {e}")
+            raise
     await cursor.close()
 
     await run_schema_migrations(db)

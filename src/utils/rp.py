@@ -1,11 +1,7 @@
 from src.utils.db import get_db_connection
+from src.config import RP_ALLOWED_ROLE_IDS
 
-RP_ALLOWED_ROLES = {
-    1437105432291315806,
-    1437105432291315805,
-    1437105432278728784,
-    1507492860956774633,
-}
+RP_ALLOWED_ROLES = RP_ALLOWED_ROLE_IDS
 
 # guild_id -> {prefix: (char_id, user_id, name, image_url)}
 _prefix_cache: dict[int, dict[str, tuple]] = {}

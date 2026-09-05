@@ -3,12 +3,15 @@
 from discord import Embed, Interaction
 from discord.ui import Button
 import discord
+import logging
 
 from src.utils.db import get_db_connection
 from src.utils.format import format_amount
 from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
 from src.utils.transactions import record_transaction
+
+logger = logging.getLogger(__name__)
 
 
 async def send_purchase_log(interaction, role, prix, success: bool, detail: str):
@@ -40,30 +43,58 @@ async def send_purchase_log(interaction, role, prix, success: bool, detail: str)
         embed.add_field(name="Détail", value=detail, inline=False)
         await channel.send(embed=embed)
     except (discord.Forbidden, discord.HTTPException, ValueError, TypeError) as exc:
-        print(f"[LOG ACHAT] Envoi ignoré : {exc}")
+        logger.warning("Envoi du log d'achat ignoré : %s", exc)
     except Exception as exc:
-        print(f"[LOG ACHAT] Lecture de configuration impossible : {exc}")
+        logger.exception("Lecture de la configuration du log d'achat impossible")
 
 
-async def process_purchase(interaction: Interaction, role_id: int, prix: int, nom_role: str):
+async def process_purchase(interaction: Interaction, item_id: int, expected_price: int):
     await interaction.response.defer()
-
-    role = interaction.guild.get_role(int(role_id))
-    if role is None:
-        await interaction.edit_original_response(content="❌ Le rôle associé à cet article n'existe plus.", view=None)
-        return
-    if role in interaction.user.roles:
-        await interaction.edit_original_response(content=f"❌ Tu possèdes déjà {role.mention}.", view=None)
-        return
-
-    from src.utils.economy_config import get_guild_economy_config
-    starting_balance = (await get_guild_economy_config(interaction.guild_id))["starting_balance"]
 
     db = await get_db_connection()
     role_added = False
+    role = None
+    prix = expected_price
+    nom_role = "article"
     try:
         await db.begin()
         async with db.cursor() as cursor:
+            await cursor.execute(
+                "SELECT role_id, prix, nom FROM guild_boutique_roles "
+                "WHERE guild_id = %s AND id = %s FOR UPDATE",
+                (interaction.guild_id, item_id),
+            )
+            item = await cursor.fetchone()
+            if item is None:
+                await db.rollback()
+                await interaction.edit_original_response(
+                    content="❌ Cet article n'est plus disponible. Recharge la boutique.", view=None
+                )
+                return
+            role_id, prix, nom_role = item
+            if prix != expected_price:
+                await db.rollback()
+                await interaction.edit_original_response(
+                    content="⚠️ Le prix de cet article a changé. Recharge la boutique avant de confirmer.", view=None
+                )
+                return
+
+            role = interaction.guild.get_role(int(role_id))
+            if role is None:
+                await db.rollback()
+                await interaction.edit_original_response(
+                    content="❌ Le rôle associé à cet article n'existe plus.", view=None
+                )
+                return
+            if role in interaction.user.roles:
+                await db.rollback()
+                await interaction.edit_original_response(
+                    content=f"❌ Tu possèdes déjà {role.mention}.", view=None
+                )
+                return
+
+            from src.utils.economy_config import get_guild_economy_config
+            starting_balance = (await get_guild_economy_config(interaction.guild_id))["starting_balance"]
             await cursor.execute(
                 "INSERT INTO guild_wallets (guild_id, user_id, balance) VALUES (%s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
@@ -107,12 +138,19 @@ async def process_purchase(interaction: Interaction, role_id: int, prix: int, no
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        if role_added:
+        if role_added and role is not None:
             try:
                 await interaction.user.remove_roles(role, reason="Annulation d'un achat boutique échoué")
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-        print(f"[ACHAT] Échec pour {interaction.user.id}: {exc}")
+            except (discord.Forbidden, discord.HTTPException) as compensation_exc:
+                logger.critical(
+                    "Compensation Discord impossible après échec d'achat user=%s role=%s: %s",
+                    interaction.user.id, role.id, compensation_exc,
+                )
+                await send_purchase_log(
+                    interaction, role, prix, False,
+                    "Le débit a été annulé mais le rôle n'a pas pu être retiré; intervention manuelle requise.",
+                )
+        logger.exception("Échec de l'achat pour user=%s", interaction.user.id)
         await interaction.edit_original_response(
             content="❌ L'achat a échoué. Aucun coin n'a été retiré.", view=None
         )
@@ -130,7 +168,10 @@ async def process_purchase(interaction: Interaction, role_id: int, prix: int, no
     await send_purchase_log(interaction, role, prix, True, "Rôle attribué et solde débité.")
 
 
-async def show_purchase_confirmation(interaction: Interaction, role_id: int, prix: int, nom_role: str, edit: bool = False):
+async def show_purchase_confirmation(
+    interaction: Interaction, item_id: int, role_id: int, prix: int,
+    nom_role: str, edit: bool = False,
+):
     embed = Embed(
         title="🛒 Confirmer l'achat ?",
         description=f"Tu t'apprêtes à acheter <@&{role_id}> pour **{format_amount(prix)}💰**.",
@@ -138,13 +179,13 @@ async def show_purchase_confirmation(interaction: Interaction, role_id: int, pri
     )
     set_bot_footer(embed, interaction)
 
-    view = ExpiringView(timeout=30)
+    view = ExpiringView(timeout=30, owner_id=interaction.user.id)
 
     confirm_btn = Button(label="Confirmer", style=discord.ButtonStyle.green, emoji="✅")
     cancel_btn = Button(label="Annuler", style=discord.ButtonStyle.red, emoji="❌")
 
     async def confirm_callback(inter: Interaction):
-        await process_purchase(inter, role_id, prix, nom_role)
+        await process_purchase(inter, item_id, prix)
 
     async def cancel_callback(inter: Interaction):
         cancel_embed = Embed(title="❌ Achat annulé", color=discord.Color.red())

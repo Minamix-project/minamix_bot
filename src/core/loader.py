@@ -24,3 +24,4 @@ async def load_modules(bot, directory: str, label: str):
                 print(f"[{label}] {module_name}")
         except Exception as e:
             print(f"[ERREUR] {module_name}: {e}")
+            raise

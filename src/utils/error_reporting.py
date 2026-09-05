@@ -1,11 +1,13 @@
 """Technical error notifications to a private channel, without exposing sensitive details."""
 
 import secrets
-import traceback
+import logging
 
 import discord
 
 from src.utils.db import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_error_logs_channel(bot: discord.Client, guild_id: int):
@@ -49,12 +51,17 @@ async def report_error(bot: discord.Client, *, guild_ids, source: str, error: Ba
     """Log the full error to the console once, notify the error channel(s)
     (no traceback or sensitive detail), return a short reference to give to the user."""
     ref = secrets.token_hex(4)
-    print(f"[ERREUR {ref}] {source}: {error}")
-    traceback.print_exc()
+    logger.error(
+        "Erreur %s dans %s", ref, source,
+        exc_info=(type(error), error, error.__traceback__),
+    )
 
     if isinstance(guild_ids, int):
         guild_ids = [guild_ids]
     for guild_id in guild_ids or ():
-        await _notify_channel(bot, guild_id, ref, source, error, user)
+        try:
+            await _notify_channel(bot, guild_id, ref, source, error, user)
+        except Exception:
+            logger.exception("Impossible d'envoyer l'erreur %s au serveur %s", ref, guild_id)
 
     return ref

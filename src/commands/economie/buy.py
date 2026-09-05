@@ -33,8 +33,8 @@ async def register(bot):
                 set_bot_footer(embed, interaction)
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
-            _, role_id, prix, nom_role, *__ = items[numero_int - 1]
-            await show_purchase_confirmation(interaction, role_id, prix, nom_role, edit=False)
+            item_id, role_id, prix, nom_role, *__ = items[numero_int - 1]
+            await show_purchase_confirmation(interaction, item_id, role_id, prix, nom_role, edit=False)
             return
 
         options = [
@@ -50,11 +50,11 @@ async def register(bot):
 
         async def callback(inter: Interaction):
             num = int(select.values[0])
-            _, role_id, prix, nom_role, *__ = items[num - 1]
-            await show_purchase_confirmation(inter, role_id, prix, nom_role, edit=True)
+            item_id, role_id, prix, nom_role, *__ = items[num - 1]
+            await show_purchase_confirmation(inter, item_id, role_id, prix, nom_role, edit=True)
 
         select.callback = callback
-        view = ExpiringView()
+        view = ExpiringView(owner_id=interaction.user.id)
         view.add_item(select)
         await interaction.response.send_message("Quel article veux-tu acheter ?", view=view, ephemeral=True)
         view.message = await interaction.original_response()

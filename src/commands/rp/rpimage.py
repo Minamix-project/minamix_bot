@@ -96,7 +96,7 @@ async def register(bot):
             await inter.edit_original_response(embed=embed)
 
         select.callback = on_select
-        view = ExpiringView()
+        view = ExpiringView(owner_id=interaction.user.id)
         view.add_item(select)
 
         embed = discord.Embed(

@@ -1,11 +1,14 @@
 import os
 import asyncio
 import json
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+
+load_dotenv()
 
 from src.config import GUILD_IDS
 from src.core.db_init import init_db
@@ -21,8 +24,11 @@ def run_bot():
 
 
 async def _main():
-    load_dotenv()
-
+    log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     await create_db_pool()
     db = await get_db_connection()
     try:
