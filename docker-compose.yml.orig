@@ -3,7 +3,7 @@ services:
     image: mysql:8
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
@@ -19,12 +19,6 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
-    environment:
-      BOT_VERSION: ${BOT_VERSION:-dev}
-      GIT_COMMIT: ${GIT_COMMIT:-unknown}
-      DEPLOY_NOTIFICATION: ${DEPLOY_NOTIFICATION:-0}
-    volumes:
-      - ./backups:/app/backups:ro
     depends_on:
       db:
         condition: service_healthy

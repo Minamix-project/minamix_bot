@@ -64,7 +64,7 @@ _MODERATION = (
 async def register(bot):
     @bot.tree.command(name="help", description="Affiche les commandes du bot.")
     async def help(interaction: Interaction):
-        is_admin_user = is_admin(interaction.user)
+        is_admin = interaction.user.guild_permissions.administrator
 
         options = [
             discord.SelectOption(label="Général", value="general", description="Commandes générales", emoji="🌐"),
