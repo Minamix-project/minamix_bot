@@ -1,36 +1,18 @@
 """Règles d'accès partagées pour les commandes du bot."""
 
-import os
-from functools import lru_cache
-
 import discord
 from discord import app_commands
 
 from src.utils.rp import RP_ALLOWED_ROLES
 
 
-@lru_cache(maxsize=1)
-def get_bot_admin_role_ids() -> frozenset[int]:
-    """Rôles autorisés par BOT_ADMIN_ROLE_IDS (IDs séparés par des virgules)."""
-    role_ids = set()
-    for raw_id in os.getenv("BOT_ADMIN_ROLE_IDS", "").split(","):
-        raw_id = raw_id.strip()
-        if not raw_id:
-            continue
-        try:
-            role_ids.add(int(raw_id))
-        except ValueError:
-            print(f"[PERMS] ID de rôle admin ignoré : {raw_id!r}")
-    return frozenset(role_ids)
-
-
 def is_admin(member: discord.abc.User) -> bool:
-    """True pour un admin Discord ou un rôle administrateur du bot."""
+    """True avec Administrateur ou Gérer le serveur."""
     permissions = getattr(member, "guild_permissions", None)
-    if permissions and permissions.administrator:
-        return True
-    allowed_roles = get_bot_admin_role_ids()
-    return any(role.id in allowed_roles for role in getattr(member, "roles", ()))
+    return bool(
+        permissions
+        and (permissions.administrator or permissions.manage_guild)
+    )
 
 
 def is_rp_manager(member: discord.abc.User) -> bool:
@@ -43,7 +25,7 @@ def is_rp_manager(member: discord.abc.User) -> bool:
 def admin_only():
     """Marque une commande comme admin dans Discord et vérifie l'accès côté bot."""
     def decorator(func):
-        func = app_commands.default_permissions(administrator=True)(func)
+        func = app_commands.default_permissions(manage_guild=True)(func)
         return app_commands.check(lambda interaction: is_admin(interaction.user))(func)
     return decorator
 
