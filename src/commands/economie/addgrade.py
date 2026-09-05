@@ -54,8 +54,8 @@ async def register(bot):
         cursor = db.cursor()
         try:
             cursor.execute(
-                "INSERT INTO boutique_roles (role_id, prix, nom, description, exclusif) VALUES (%s, %s, %s, %s, %s)",
-                (role.id, prix, nom, description, exclusif)
+                "INSERT INTO guild_boutique_roles (guild_id, role_id, prix, nom, description, exclusif) VALUES (%s, %s, %s, %s, %s, %s)",
+                (interaction.guild_id, role.id, prix, nom, description, exclusif)
             )
             db.commit()
 

@@ -29,7 +29,7 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        items = get_shop_items()
+        items = get_shop_items(interaction.guild_id)
 
         if numero < 1 or numero > len(items):
             embed = discord.Embed(
@@ -66,7 +66,7 @@ async def register(bot):
 
         if deduire:
             db = get_db_connection()
-            balance = await get_user_balance(db, user.id)
+            balance = await get_user_balance(db, interaction.guild_id, user.id)
             if balance < prix:
                 embed = discord.Embed(
                     title="❌ Solde insuffisant",
@@ -80,7 +80,7 @@ async def register(bot):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 db.close()
                 return
-            await modify_user_balance(db, user.id, prix, "remove")
+            await modify_user_balance(db, interaction.guild_id, user.id, prix, "remove")
             db.close()
 
         try:

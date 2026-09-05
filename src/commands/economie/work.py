@@ -101,7 +101,7 @@ async def register(bot):
 
         gain = random.randint(50, 250)
 
-        new_balance = await modify_user_balance(db, user_id, gain, "add")
+        new_balance = await modify_user_balance(db, interaction.guild_id, user_id, gain, "add")
 
         cursor.execute("UPDATE users SET last_work = %s WHERE user_id = %s", (current_time, user_id))
         db.commit()

@@ -56,6 +56,25 @@ def _run_migrations(db):
     cursor.close()
 
 
+
+def _migrate_economy_per_guild(db):
+    from src.config import GUILD_IDS
+    cursor = db.cursor()
+    for guild_id in GUILD_IDS:
+        cursor.execute(
+            "INSERT IGNORE INTO guild_wallets (guild_id, user_id, balance) "
+            "SELECT %s, user_id, balance FROM wallets",
+            (guild_id,),
+        )
+        cursor.execute(
+            "INSERT INTO guild_boutique_roles (guild_id, role_id, prix, nom, description, exclusif) "
+            "SELECT %s, role_id, prix, nom, description, exclusif FROM boutique_roles "
+            "WHERE NOT EXISTS (SELECT 1 FROM guild_boutique_roles WHERE guild_id = %s)",
+            (guild_id, guild_id),
+        )
+    db.commit()
+    cursor.close()
+
 def init_db(db):
     model_dir = Path("src/model")
     if not model_dir.exists():
@@ -74,3 +93,4 @@ def init_db(db):
     cursor.close()
 
     _run_migrations(db)
+    _migrate_economy_per_guild(db)

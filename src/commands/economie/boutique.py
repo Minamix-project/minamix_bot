@@ -22,7 +22,7 @@ async def register(bot):
         description="Affiche la boutique des rôles disponibles."
     )
     async def boutique(interaction: Interaction):
-        items = get_shop_items()
+        items = get_shop_items(interaction.guild_id)
 
         if not items:
             embed = discord.Embed(

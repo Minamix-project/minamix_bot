@@ -64,7 +64,7 @@ async def register(bot):
         try:
             from src.utils.db import get_db_connection
             db = get_db_connection()
-            await modify_user_balance(db, message.author.id, gain, "add")
+            await modify_user_balance(db, message.guild.id, message.author.id, gain, "add")
             db.close()
         except Exception:
             pass

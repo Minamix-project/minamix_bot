@@ -17,7 +17,8 @@ async def register(bot):
         db = get_db_connection()
         cursor = db.cursor()
         cursor.execute(
-            "SELECT user_id, balance FROM wallets ORDER BY balance DESC LIMIT 20"
+            "SELECT user_id, balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance DESC LIMIT 100"
+            , (interaction.guild_id,)
         )
         rows = cursor.fetchall()
         cursor.close()

@@ -9,9 +9,9 @@ from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
 
 
-def _get_items():
+def _get_items(guild_id: int):
     from src.utils.shop import get_shop_items
-    return get_shop_items()
+    return get_shop_items(guild_id)
 
 
 async def _process_purchase(interaction: Interaction, role_id: int, prix: int, nom_role: str):
@@ -31,11 +31,11 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
         db.begin()
         with db.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO wallets (user_id, balance) VALUES (%s, 0) "
+                "INSERT INTO guild_wallets (guild_id, user_id, balance) VALUES (%s, %s, 0) "
                 "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
-                (interaction.user.id,),
+                (interaction.guild_id, interaction.user.id),
             )
-            cursor.execute("SELECT balance FROM wallets WHERE user_id = %s FOR UPDATE", (interaction.user.id,))
+            cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s AND user_id = %s FOR UPDATE", (interaction.guild_id, interaction.user.id))
             current_balance = cursor.fetchone()[0]
 
             if current_balance < prix:
@@ -60,8 +60,8 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
                 return
 
             cursor.execute(
-                "UPDATE wallets SET balance = balance - %s WHERE user_id = %s AND balance >= %s",
-                (prix, interaction.user.id, prix),
+                "UPDATE guild_wallets SET balance = balance - %s WHERE guild_id = %s AND user_id = %s AND balance >= %s",
+                (prix, interaction.guild_id, interaction.user.id, prix),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Le solde a changé pendant l'achat.")
@@ -128,7 +128,7 @@ async def register(bot):
     @bot.tree.command(name="buy", description="Acheter un rôle dans la boutique.")
     @app_commands.describe(numero="Numéro de l'article (laisser vide pour voir la liste)")
     async def buy(interaction: Interaction, numero: int = None):
-        items = _get_items()
+        items = _get_items(interaction.guild_id)
 
         if not items:
             await interaction.response.send_message("La boutique est vide.", ephemeral=True)

@@ -34,7 +34,7 @@ async def register(bot):
             return
 
         db = get_db_connection()
-        new_balance = await modify_user_balance(db, user.id, montant, "remove")
+        new_balance = await modify_user_balance(db, interaction.guild_id, user.id, montant, "remove")
 
         embed = create_balance_embed(user, new_balance, interaction)
         embed.title = f"💸 {montant} retiré à {user.name}"

@@ -46,7 +46,7 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
         async def yes_callback(inter: Interaction):
             db = get_db_connection()
             cursor = db.cursor()
-            cursor.execute("UPDATE wallets SET balance = 0")
+            cursor.execute("UPDATE guild_wallets SET balance = 0 WHERE guild_id = %s", (inter.guild_id,))
             cursor.execute("UPDATE users SET last_work = 0")
             db.commit()
             count = cursor.rowcount

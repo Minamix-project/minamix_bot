@@ -7,7 +7,7 @@ async def register(bot):
     @bot.tree.command(name="balance", description="Voir votre solde 💰")
     async def solde(interaction: Interaction):
         db = get_db_connection()
-        balance = await get_user_balance(db, interaction.user.id)
+        balance = await get_user_balance(db, interaction.guild_id, interaction.user.id)
         embed = create_balance_embed(interaction.user, balance, interaction)
 
         await interaction.response.send_message(embed=embed, ephemeral=False)

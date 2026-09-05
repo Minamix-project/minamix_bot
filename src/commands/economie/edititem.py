@@ -36,7 +36,7 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        items = get_shop_items()
+        items = get_shop_items(interaction.guild_id)
 
         if numero < 1 or numero > len(items):
             embed = discord.Embed(
@@ -74,7 +74,7 @@ async def register(bot):
         db = get_db_connection()
         cursor = db.cursor()
         cursor.execute(
-            "UPDATE boutique_roles SET prix = %s, nom = %s, description = %s, exclusif = %s WHERE id = %s",
+            "UPDATE guild_boutique_roles SET prix = %s, nom = %s, description = %s, exclusif = %s WHERE id = %s",
             (new_prix, new_nom, new_desc, new_excl, actual_id)
         )
         db.commit()
