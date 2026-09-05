@@ -53,7 +53,7 @@ async def update_guild_economy_config(guild_id: int, **changes) -> dict:
     """Update only the provided fields (others are left unchanged)."""
     unknown = set(changes) - set(_COLUMNS)
     if unknown:
-        raise ValueError(f"Champs de config inconnus : {unknown}")
+        raise ValueError(f"Unknown configuration fields: {unknown}")
 
     db = await get_db_connection()
     try:

@@ -41,10 +41,10 @@ async def run_schema_migrations(db) -> None:
                     (version, sql_file.name),
                 )
                 await db.commit()
-                print(f"[MIGRATION] {version} appliquée")
+                print(f"[MIGRATION] Applied {version}")
             except Exception as exc:
                 await db.rollback()
-                print(f"[ERREUR MIGRATION] {version}: {exc}")
+                print(f"[MIGRATION ERROR] {version}: {exc}")
                 raise
     finally:
         await cursor.close()

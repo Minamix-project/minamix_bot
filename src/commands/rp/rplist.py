@@ -58,7 +58,7 @@ async def register(bot):
             try:
                 view.message = await interaction.original_response()
             except discord.HTTPException as exc:
-                print(f"[RPLIST] Impossible de récupérer le message de pagination : {exc}")
+                print(f"[RPLIST] Could not fetch pagination message: {exc}")
         else:
             await interaction.response.send_message(
                 embed=view.current_embed(), ephemeral=True

@@ -14,7 +14,7 @@ async def _table_exists(cursor, table: str) -> bool:
     )
     return (await cursor.fetchone())[0] > 0
 
-# Column migrations: (table, column, ALTER statement)
+# Column migrations: (table, column, ALTER statement).
 _COLUMN_MIGRATIONS = [
     (
         "boutique_roles",
@@ -47,9 +47,9 @@ async def _run_migrations(db):
         if (await cursor.fetchone())[0] == 0:
             await cursor.execute(sql)
             await db.commit()
-            print(f"[MIGRATION] {table}.{column} ajouté")
+            print(f"[MIGRATION] Added {table}.{column}")
 
-    # Make discoveries global: remove guild_id if still present
+    # Make discoveries global: remove guild_id if it is still present.
     await cursor.execute(
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'discoveries' AND COLUMN_NAME = 'guild_id'"
@@ -65,7 +65,7 @@ async def _run_migrations(db):
         await cursor.execute("ALTER TABLE discoveries DROP COLUMN guild_id")
         await cursor.execute("ALTER TABLE discoveries ADD PRIMARY KEY (user_id, egg_key)")
         await db.commit()
-        print("[MIGRATION] discoveries rendu global (guild_id supprimé)")
+        print("[MIGRATION] Made discoveries global (removed guild_id)")
 
     await cursor.close()
 
@@ -111,7 +111,7 @@ async def _migrate_economy_per_guild(db):
 async def init_db(db):
     model_dir = Path("src/model")
     if not model_dir.exists():
-        print("[WARN] Dossier 'src/model/' introuvable.")
+        print("[WARN] Directory 'src/model/' not found.")
         return
 
     cursor = await db.cursor()
@@ -127,13 +127,13 @@ async def init_db(db):
             re.IGNORECASE,
         )
         if table_match and await _table_exists(cursor, table_match.group(1)):
-            print(f"[SQL] {sql_file} (déjà présente)")
+            print(f"[SQL] {sql_file} (already exists)")
             continue
         try:
             await cursor.execute(sql)
             print(f"[SQL] {sql_file}")
         except Exception as e:
-            print(f"[ERREUR SQL] {sql_file}: {e}")
+            print(f"[SQL ERROR] {sql_file}: {e}")
             raise
     await cursor.close()
 

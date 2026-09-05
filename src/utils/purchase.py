@@ -43,9 +43,9 @@ async def send_purchase_log(interaction, role, prix, success: bool, detail: str)
         embed.add_field(name="Détail", value=detail, inline=False)
         await channel.send(embed=embed)
     except (discord.Forbidden, discord.HTTPException, ValueError, TypeError) as exc:
-        logger.warning("Envoi du log d'achat ignoré : %s", exc)
+        logger.warning("Purchase log delivery skipped: %s", exc)
     except Exception as exc:
-        logger.exception("Lecture de la configuration du log d'achat impossible")
+        logger.exception("Could not read purchase-log configuration")
 
 
 async def process_purchase(interaction: Interaction, item_id: int, expected_price: int):
@@ -130,7 +130,7 @@ async def process_purchase(interaction: Interaction, item_id: int, expected_pric
                 (prix, interaction.guild_id, interaction.user.id, prix),
             )
             if cursor.rowcount != 1:
-                raise RuntimeError("Le solde a changé pendant l'achat.")
+                raise RuntimeError("The balance changed during the purchase.")
             await record_transaction(
                 db, interaction.guild_id, interaction.user.id, "achat",
                 -prix, current_balance - prix, detail=nom_role,
@@ -143,14 +143,14 @@ async def process_purchase(interaction: Interaction, item_id: int, expected_pric
                 await interaction.user.remove_roles(role, reason="Annulation d'un achat boutique échoué")
             except (discord.Forbidden, discord.HTTPException) as compensation_exc:
                 logger.critical(
-                    "Compensation Discord impossible après échec d'achat user=%s role=%s: %s",
+                    "Discord compensation failed after purchase error user=%s role=%s: %s",
                     interaction.user.id, role.id, compensation_exc,
                 )
                 await send_purchase_log(
                     interaction, role, prix, False,
-                    "Le débit a été annulé mais le rôle n'a pas pu être retiré; intervention manuelle requise.",
+                    "The debit was rolled back but the role could not be removed; manual intervention required.",
                 )
-        logger.exception("Échec de l'achat pour user=%s", interaction.user.id)
+        logger.exception("Purchase failed for user=%s", interaction.user.id)
         await interaction.edit_original_response(
             content="❌ L'achat a échoué. Aucun coin n'a été retiré.", view=None
         )

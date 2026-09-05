@@ -8,7 +8,7 @@ def calculate_balance(current: int, amount: int, operation: str, cap: int | None
         return min(value, cap) if cap is not None else value
     if operation == "remove": return max(current - amount, 0)
     if operation == "set": return amount
-    raise ValueError(f"Opération inconnue : {operation}")
+    raise ValueError(f"Unknown operation: {operation}")
 
 
 async def modify_user_balance(db, guild_id: int, user_id: int, amount: int, operation: str = "add",

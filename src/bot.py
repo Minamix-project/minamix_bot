@@ -38,7 +38,7 @@ async def _main():
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        raise RuntimeError("DISCORD_TOKEN manquant dans le .env")
+        raise RuntimeError("DISCORD_TOKEN is missing from .env")
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -164,18 +164,18 @@ async def _main():
 
     @bot.event
     async def on_ready():
-        print(f"Connecté : {bot.user}")
+        print(f"Connected: {bot.user}")
         try:
             for guild_id in GUILD_IDS:
                 guild = discord.Object(id=guild_id)
                 bot.tree.copy_global_to(guild=guild)
                 synced = await bot.tree.sync(guild=guild)
-                print(f"[SYNC] {len(synced)} commandes → {guild_id}")
+                print(f"[SYNC] {len(synced)} commands -> {guild_id}")
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
             await send_deployment_logs()
         except Exception as e:
-            print(f"[ERREUR SYNC] {e}")
+            print(f"[SYNC ERROR] {e}")
 
         if not check_backup_test_status.is_running():
             check_backup_test_status.start()

@@ -6,7 +6,7 @@ from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
 
 NAX_ICON = "src/assets/nax.png"
-# Remplace par l'emoji serveur une fois uploadé : "<:nax:ID_EMOJI>"
+# Replace with the server emoji after uploading it: "<:nax:ID_EMOJI>".
 NAX_EMOJI = "<:nax:1508570111437574254>"
 
 

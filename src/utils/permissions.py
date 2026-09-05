@@ -1,4 +1,4 @@
-"""Règles d'accès partagées pour les commandes du bot."""
+"""Shared access rules for bot commands."""
 
 import discord
 from discord import app_commands
@@ -7,7 +7,7 @@ from src.utils.rp import RP_ALLOWED_ROLES
 
 
 def is_admin(member: discord.abc.User) -> bool:
-    """True avec Administrateur ou Gérer le serveur."""
+    """Return true for Administrator or Manage Server members."""
     permissions = getattr(member, "guild_permissions", None)
     return bool(
         permissions
@@ -16,14 +16,14 @@ def is_admin(member: discord.abc.User) -> bool:
 
 
 def is_rp_manager(member: discord.abc.User) -> bool:
-    """Les admins du bot et les rôles RP configurés peuvent gérer le RP."""
+    """Allow bot admins and configured RP roles to manage roleplay."""
     if is_admin(member):
         return True
     return any(role.id in RP_ALLOWED_ROLES for role in getattr(member, "roles", ()))
 
 
 def admin_only():
-    """Marque une commande comme admin dans Discord et vérifie l'accès côté bot."""
+    """Mark a command as admin-only in Discord and enforce it in the bot."""
     def decorator(func):
         func = app_commands.default_permissions(manage_guild=True)(func)
         return app_commands.check(lambda interaction: is_admin(interaction.user))(func)
@@ -31,7 +31,7 @@ def admin_only():
 
 
 def rp_only():
-    """Vérifie l'accès des gestionnaires RP côté bot."""
+    """Enforce access for configured RP managers."""
     return app_commands.check(lambda interaction: is_rp_manager(interaction.user))
 
 

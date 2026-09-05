@@ -74,7 +74,7 @@ async def register(bot):
             )
             _rp_messages[msg.id] = owner_id
         except Exception as e:
-            print(f"[RP] Erreur webhook : {e}")
+            print(f"[RP] Webhook error: {e}")
 
     @bot.listen("on_raw_reaction_add")
     async def on_reaction_rp_delete(payload: RawReactionActionEvent):

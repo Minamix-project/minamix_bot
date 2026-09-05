@@ -62,6 +62,6 @@ async def report_error(bot: discord.Client, *, guild_ids, source: str, error: Ba
         try:
             await _notify_channel(bot, guild_id, ref, source, error, user)
         except Exception:
-            logger.exception("Impossible d'envoyer l'erreur %s au serveur %s", ref, guild_id)
+            logger.exception("Could not send error %s to guild %s", ref, guild_id)
 
     return ref

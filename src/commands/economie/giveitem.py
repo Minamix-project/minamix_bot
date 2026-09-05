@@ -134,7 +134,7 @@ async def register(bot):
                         (prix, interaction.guild_id, user.id, prix),
                     )
                     if cursor.rowcount != 1:
-                        raise RuntimeError("Le solde a changé pendant l’attribution du rôle.")
+                        raise RuntimeError("The balance changed while assigning the role.")
 
                     await record_transaction(
                         db,
@@ -155,7 +155,7 @@ async def register(bot):
                         )
                     except (discord.Forbidden, discord.HTTPException):
                         pass
-                print(f"[GIVEITEM] Échec pour {user.id}: {exc}")
+                print(f"[GIVEITEM] Failure for {user.id}: {exc}")
                 await interaction.edit_original_response(
                     content="❌ L’attribution a échoué. Aucun coin n’a été retiré."
                 )

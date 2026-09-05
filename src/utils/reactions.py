@@ -28,7 +28,7 @@ async def _mark_found(user_id: int, key: str) -> None:
         await cursor.close()
         db.close()
     except Exception:
-        logger.exception("Impossible d'enregistrer la découverte user=%s key=%s", user_id, key)
+        logger.exception("Could not save discovery user=%s key=%s", user_id, key)
 
 
 async def handle(message: Message) -> None:

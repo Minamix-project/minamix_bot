@@ -35,7 +35,7 @@ async def modify_balance(db, guild_id: int, user_id: int, amount: int, operation
     elif operation == "set":
         value = amount
     else:
-        raise ValueError(f"Opération inconnue : {operation}")
+        raise ValueError(f"Unknown operation: {operation}")
     async with db.cursor() as cursor:
         await cursor.execute("UPDATE guild_wallets SET balance = %s WHERE guild_id = %s AND user_id = %s", (value, guild_id, user_id))
     return value

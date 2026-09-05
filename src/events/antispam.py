@@ -39,7 +39,7 @@ async def register(bot):
             await message.delete()
             deleted = True
         except (discord.Forbidden, discord.HTTPException) as exc:
-            logger.warning("Suppression anti-spam refusée guild=%s message=%s: %s", message.guild.id, message.id, exc)
+            logger.warning("Anti-spam message deletion denied guild=%s message=%s: %s", message.guild.id, message.id, exc)
 
         banned = False
         try:
@@ -50,7 +50,7 @@ async def register(bot):
             )
             banned = True
         except (discord.Forbidden, discord.HTTPException) as exc:
-            logger.error("Ban anti-spam refusé guild=%s user=%s: %s", message.guild.id, message.author.id, exc)
+            logger.error("Anti-spam ban denied guild=%s user=%s: %s", message.guild.id, message.author.id, exc)
 
         if not logs_result:
             return
@@ -72,4 +72,4 @@ async def register(bot):
         try:
             await logs_channel.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException) as exc:
-            logger.error("Envoi du log anti-spam refusé guild=%s: %s", message.guild.id, exc)
+            logger.error("Anti-spam log delivery denied guild=%s: %s", message.guild.id, exc)

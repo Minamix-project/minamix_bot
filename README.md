@@ -1,210 +1,206 @@
 # MinamixBot
 
-Bot Discord communautaire en Python comprenant une économie par serveur, une
-boutique de rôles, des outils de modération, un système d'absence et des
-personnages RP via webhooks.
+Python Discord bot with a per-guild economy, role shop, moderation tools,
+absence tracking, and roleplay characters powered by webhooks.
 
-## Prérequis
+## Requirements
 
-- Docker avec le plugin Docker Compose ;
-- un bot créé dans le [Discord Developer Portal](https://discord.com/developers/applications) ;
-- les intents privilégiés **Message Content Intent** et **Server Members Intent** ;
-- les permissions Discord nécessaires au bot : voir et envoyer des messages,
-  gérer les rôles, gérer les webhooks, gérer les messages et bannir des membres.
+- Docker with the Docker Compose plugin;
+- a bot created in the [Discord Developer Portal](https://discord.com/developers/applications);
+- the privileged **Message Content Intent** and **Server Members Intent**;
+- the Discord permissions required by enabled features: view/send messages,
+  manage roles, manage webhooks, manage messages, and ban members.
 
-> Ne publiez jamais le token Discord. S'il apparaît dans un message, un log ou
-> un commit, réinitialisez-le immédiatement dans le Developer Portal.
+> Never publish a Discord token. If it appears in a message, log, or commit,
+> revoke it immediately in the Developer Portal.
 
 ## Installation
 
-1. Copier la configuration :
+1. Copy the configuration:
 
    ```bash
    cp .env.example .env
    ```
 
-2. Remplacer les mots de passe et renseigner le nouveau token dans `.env`.
+2. Replace passwords and set a newly generated token in `.env`.
 
-3. Vérifier la configuration sans lancer de service :
+3. Validate the configuration without starting services:
 
    ```bash
    docker compose config
    ```
 
-4. Construire et démarrer l'ensemble :
+4. Build and start the stack:
 
    ```bash
    docker compose up -d --build
    ```
 
-La base est initialisée et les migrations SQL sont appliquées automatiquement
-au démarrage. Une erreur de création de table, de migration ou de chargement
-d'un module interrompt maintenant le démarrage.
+The database schema and migrations are initialized automatically. A table,
+migration, or module-loading failure stops startup instead of leaving a partial
+bot running.
 
 ## Configuration
 
-| Variable | Requise | Valeur par défaut | Description |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `DISCORD_TOKEN` | oui | — | Token secret du bot Discord |
-| `DISCORD_GUILD_IDS` | non | IDs historiques du projet | Serveurs autorisés, séparés par des virgules |
-| `RP_ALLOWED_ROLE_IDS` | non | rôles historiques du projet | Rôles autorisés à gérer le RP |
-| `DB_HOST` | oui | — | Hôte MySQL, généralement `db` avec Compose |
-| `DB_PORT` | non | `3306` | Port MySQL |
-| `DB_NAME` | oui | — | Nom de la base |
-| `DB_USER` | oui | — | Utilisateur applicatif |
-| `DB_PASSWORD` | oui | — | Mot de passe applicatif |
-| `MYSQL_ROOT_PASSWORD` | oui | — | Mot de passe root utilisé par le conteneur MySQL |
-| `DB_POOL_MIN_SIZE` | non | `1` | Taille minimale du pool |
-| `DB_POOL_MAX_SIZE` | non | `10` | Taille maximale du pool |
-| `DB_POOL_RECYCLE_SECONDS` | non | `1800` | Renouvellement des connexions |
-| `DB_CONNECT_TIMEOUT_SECONDS` | non | `10` | Délai maximal de connexion |
-| `BACKUP_INTERVAL_SECONDS` | non | `21600` | Intervalle entre les dumps |
-| `BACKUP_RETENTION_DAYS` | non | `14` | Durée de conservation |
-| `BACKUP_TEST_INTERVAL_SECONDS` | non | `86400` | Intervalle des tests de restauration |
-| `BACKUP_TEST_ROOT_PASSWORD` | non | valeur interne | Mot de passe de la base temporaire de restauration |
-| `LOG_LEVEL` | non | `INFO` | Niveau des logs Python |
+| `DISCORD_TOKEN` | yes | — | Secret Discord bot token |
+| `DISCORD_GUILD_IDS` | no | project defaults | Comma-separated allowed guild IDs |
+| `RP_ALLOWED_ROLE_IDS` | no | project defaults | Comma-separated RP manager role IDs |
+| `DB_HOST` | yes | — | MySQL host, usually `db` in Compose |
+| `DB_PORT` | no | `3306` | MySQL port |
+| `DB_NAME` | yes | — | Database name |
+| `DB_USER` | yes | — | Application database user |
+| `DB_PASSWORD` | yes | — | Application database password |
+| `MYSQL_ROOT_PASSWORD` | yes | — | MySQL container root password |
+| `DB_POOL_MIN_SIZE` | no | `1` | Minimum pool size |
+| `DB_POOL_MAX_SIZE` | no | `10` | Maximum pool size |
+| `DB_POOL_RECYCLE_SECONDS` | no | `1800` | Connection recycling interval |
+| `DB_CONNECT_TIMEOUT_SECONDS` | no | `10` | Connection timeout |
+| `BACKUP_INTERVAL_SECONDS` | no | `21600` | Backup interval |
+| `BACKUP_RETENTION_DAYS` | no | `14` | Backup retention period |
+| `BACKUP_TEST_INTERVAL_SECONDS` | no | `86400` | Restore-test interval |
+| `BACKUP_TEST_ROOT_PASSWORD` | no | internal default | Temporary restore database password |
+| `LOG_LEVEL` | no | `INFO` | Python log level |
 
-La syntaxe d'une variable est toujours `NOM=valeur`, jamais
-`NOM: valeur`. Utilisez des mots de passe longs et différents pour
-`DB_PASSWORD`, `MYSQL_ROOT_PASSWORD` et `BACKUP_TEST_ROOT_PASSWORD`.
+Variables use `NAME=value` syntax, never `NAME: value`. Use long, distinct
+passwords for `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and
+`BACKUP_TEST_ROOT_PASSWORD`.
 
-## Permissions des commandes
+## Permissions
 
-Les commandes d'administration exigent la permission Discord **Gérer le
-serveur** ou **Administrateur**. Les commandes de gestion RP acceptent aussi
-les rôles déclarés dans `RP_ALLOWED_ROLE_IDS`. Ces règles sont contrôlées à
-la fois par Discord et par le bot.
+Administrative commands require **Manage Server** or **Administrator**. RP
+management commands also accept roles listed in `RP_ALLOWED_ROLE_IDS`. These
+rules are enforced both by Discord command visibility and by the bot at runtime.
 
-## Commandes
+## Commands
 
-### Général et absence
+### General and absence
 
-| Commande | Description |
+| Command | Description |
 | --- | --- |
-| `/help` | Afficher l'aide interactive |
-| `/status` | Afficher l'état public et les informations du bot |
-| `/changelog` | Afficher les dernières versions GitHub |
-| `/afk` | Déclarer une absence |
-| `/back` | Annuler son absence |
-| `/absents` | Lister les membres absents — admin |
-| `/activity <user>` | Consulter l'activité d'un membre — admin |
+| `/help` | Show the interactive help |
+| `/status` | Show public bot status and information |
+| `/changelog` | Show recent GitHub releases |
+| `/afk` | Set your absence status |
+| `/back` | Clear your absence status |
+| `/absents` | List absent members — admin |
+| `/activity <user>` | View a member's activity — admin |
 
-### Économie et boutique
+### Economy and shop
 
-| Commande | Description |
+| Command | Description |
 | --- | --- |
-| `/balance` | Afficher son solde |
-| `/work` | Recevoir un gain selon le cooldown configuré |
-| `/shop` | Afficher la boutique avec pagination et boutons |
-| `/buy [numero]` | Acheter un rôle |
-| `/leaderboard [page]` | Afficher le classement |
-| `/transactions [user]` | Consulter son historique ; un admin peut viser un autre membre |
-| `/discoveries` | Afficher les découvertes secrètes |
-| `/economystats` | Afficher les statistiques économiques — admin |
-| `/economyconfig [...]` | Configurer gains, cooldown, solde initial et plafond — admin |
-| `/addmoney <user> <montant>` | Ajouter de l'argent — admin |
-| `/removemoney <user> <montant>` | Retirer de l'argent — admin |
-| `/additem <role> <prix> <nom> [exclusif] [description]` | Ajouter un article — admin |
-| `/edititem <numero> [...]` | Modifier un article — admin |
-| `/removeitem <numero>` | Supprimer un article avec confirmation — admin |
-| `/giveitem <numero> <user> [deduire]` | Donner un article, avec débit optionnel — admin |
-| `/resetbalances` | Réinitialiser les soldes après triple confirmation — admin |
+| `/balance` | Show your balance |
+| `/work` | Claim a reward using the configured cooldown |
+| `/shop` | Show the paginated role shop |
+| `/buy [number]` | Buy a role |
+| `/leaderboard [page]` | Show the wealth leaderboard |
+| `/transactions [user]` | View your history; admins may select another member |
+| `/discoveries` | Show secret discoveries |
+| `/economystats` | Show economy statistics — admin |
+| `/economyconfig [...]` | Configure rewards, cooldowns, balances, and caps — admin |
+| `/addmoney <user> <amount>` | Add currency — admin |
+| `/removemoney <user> <amount>` | Remove currency — admin |
+| `/additem <role> <price> <name> [exclusive] [description]` | Add a shop item — admin |
+| `/edititem <number> [...]` | Edit a shop item — admin |
+| `/removeitem <number>` | Remove an item with confirmation — admin |
+| `/giveitem <number> <user> [deduct]` | Give an item, optionally charging the recipient — admin |
+| `/resetbalances` | Reset balances after triple confirmation — admin |
 
-Les achats relisent et verrouillent l'article et le portefeuille en base. Un
-prix modifié ou un article supprimé invalide donc une ancienne confirmation.
-Le gain de `/work` et son cooldown sont enregistrés dans une transaction
-atomique.
+Purchases re-read and lock the item and wallet in the database. A changed
+price or deleted item invalidates an old confirmation. The `/work` reward and
+cooldown are committed atomically.
 
-### Modération et exploitation
+### Moderation and operations
 
-| Commande | Description |
+| Command | Description |
 | --- | --- |
-| `/warn <user> <reason>` | Avertir un membre — admin |
-| `/warnings <user> [page]` | Consulter ses avertissements — admin |
-| `/delwarn <user> <numero>` | Supprimer un avertissement — admin |
-| `/addantispam <channel>` | Activer le ban automatique dans un salon — admin |
-| `/removeantispam <channel>` | Désactiver l'anti-spam — admin |
-| `/listantispam` | Lister les salons anti-spam — admin |
-| `/addecoignore <channel>` | Exclure un salon des gains par message — admin |
-| `/removeecoignore <channel>` | Réautoriser les gains dans un salon — admin |
-| `/listecoignore` | Lister les salons exclus — admin |
-| `/setlogs <channel>` | Configurer les logs généraux — admin |
-| `/setwarnlogs <channel>` | Configurer les logs d'avertissements — admin |
-| `/setafklogs <channel>` | Configurer les logs d'absence — admin |
-| `/seterrorlogs <channel>` | Configurer les erreurs techniques — admin |
-| `/config` | Afficher les salons configurés et l'état des migrations — admin |
-| `/audit [auteur] [commande] [depuis_jours]` | Consulter les actions administratives — admin |
-| `/health` | Vérifier Discord et MySQL — admin |
-| `/backupstatus` | Afficher le dernier dump et son test de restauration — admin |
-| `/servers` | Afficher les serveurs autorisés — admin |
+| `/warn <user> <reason>` | Warn a member — admin |
+| `/warnings <user> [page]` | View warnings — admin |
+| `/delwarn <user> <number>` | Delete a warning — admin |
+| `/addantispam <channel>` | Enable automatic bans in a channel — admin |
+| `/removeantispam <channel>` | Disable anti-spam — admin |
+| `/listantispam` | List anti-spam channels — admin |
+| `/addecoignore <channel>` | Exclude a channel from message rewards — admin |
+| `/removeecoignore <channel>` | Re-enable message rewards — admin |
+| `/listecoignore` | List excluded channels — admin |
+| `/setlogs <channel>` | Configure general logs — admin |
+| `/setwarnlogs <channel>` | Configure warning logs — admin |
+| `/setafklogs <channel>` | Configure absence logs — admin |
+| `/seterrorlogs <channel>` | Configure technical error logs — admin |
+| `/config` | Show configured channels and migration status — admin |
+| `/audit [author] [command] [days]` | View administrative actions — admin |
+| `/health` | Check Discord and MySQL — admin |
+| `/backupstatus` | Show the latest backup and restore test — admin |
+| `/servers` | Show allowed guilds — admin |
 
-L'anti-spam journalise séparément la suppression du message et le résultat du
-ban. Les échecs techniques reçoivent une référence courte et peuvent être
-envoyés au salon configuré par `/seterrorlogs`.
+Anti-spam logs message deletion and ban results separately. Technical failures
+receive a short reference and can be sent to the channel configured with
+`/seterrorlogs`.
 
 ### Roleplay
 
-| Commande | Description |
+| Command | Description |
 | --- | --- |
-| `/roll <expression>` | Lancer des dés ; utiliser `/roll help` pour la syntaxe |
-| `/rplist [user] [page]` | Lister les personnages |
-| `/rpbourse [user]` | Afficher la bourse Nax d'un personnage |
-| `/rpcreate <user> <name> <prefix> <image>` | Créer un personnage — gestionnaire RP |
-| `/rpedit <user>` | Modifier le nom ou le préfixe — gestionnaire RP |
-| `/rpimage <user> <image>` | Modifier l'image — gestionnaire RP |
-| `/rpdelete <user>` | Supprimer un personnage — gestionnaire RP |
-| `/setrpchannel <channel>` | Configurer le salon d'annonce RP — admin |
-| `/addnax <user> <montant>` | Ajouter des Nax — admin |
-| `/removenax <user> <montant>` | Retirer des Nax — admin |
+| `/roll <expression>` | Roll dice; use `/roll help` for syntax |
+| `/rplist [user] [page]` | List characters |
+| `/rpbourse [user]` | Show a character's Nax balance |
+| `/rpcreate <user> <name> <prefix> <image>` | Create a character — RP manager |
+| `/rpedit <user>` | Edit a name or prefix — RP manager |
+| `/rpimage <user> <image>` | Change an image — RP manager |
+| `/rpdelete <user>` | Delete a character — RP manager |
+| `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
+| `/addnax <user> <amount>` | Add Nax — admin |
+| `/removenax <user> <amount>` | Remove Nax — admin |
 
-## Sauvegardes
+## Backups
 
-Le service `backup` effectue un dump périodique et supprime les fichiers plus
-anciens que `BACKUP_RETENTION_DAYS`. Les dumps sont créés avec des permissions
-réservées à leur propriétaire. Le service `backup-test` restaure régulièrement
-le dernier dump dans une base temporaire et publie son état au bot.
+The `backup` service creates periodic SQL dumps and removes files older than
+`BACKUP_RETENTION_DAYS`. Dumps are created with owner-only permissions. The
+`backup-test` service regularly restores the latest dump into a temporary
+database and exposes its status to the bot.
 
-Le dossier hôte `backups/` contient des données sensibles : placez-le sur un
-disque chiffré, limitez ses permissions et prévoyez une copie hors machine.
+The host `backups/` directory contains sensitive database data. Store it on an
+encrypted disk, restrict host permissions, and keep an off-machine copy.
 
-## Développement et exploitation
+## Development and operations
 
 ```bash
-make test      # tests unitaires
-make lint      # Ruff et compilation Python
-make status    # état des conteneurs
-make logs      # logs du bot
-make restart   # recréer uniquement le bot, sans rebuild
-make deploy    # pull Git puis rebuild du bot et des services de sauvegarde
-make stop      # arrêter les services applicatifs
+make test      # run unit tests
+make lint      # run Ruff and Python compilation checks
+make status    # show container status
+make logs      # follow bot logs
+make restart   # recreate only the bot, without rebuilding
+make deploy    # pull Git and rebuild bot and backup services
+make stop      # stop application services
 ```
 
-La CI exécute automatiquement le lint, la compilation et les tests sur les
-pushes et pull requests.
+CI automatically runs linting, compilation, and tests on pushes and pull
+requests.
 
 ## Architecture
 
 ```text
 main.py
 src/
-  bot.py          # initialisation Discord, DB, événements et commandes
-  config.py       # configuration des serveurs et rôles autorisés
+  bot.py          # Discord, database, event, and command initialization
+  config.py       # allowed guilds and roles
   commands/
     economie/
     general/
     moderation/
     rp/
-  core/           # chargement des modules et migrations
-  events/         # messages, anti-spam, AFK et RP
-  migrations/     # migrations SQL versionnées
-  model/          # schéma initial
-  utils/          # DB, économie, permissions, vues et logs
+  core/           # module loading and migrations
+  events/         # messages, anti-spam, AFK, and RP
+  migrations/     # versioned SQL migrations
+  model/          # initial schema
+  utils/           # database, economy, permissions, views, and logging
 tests/
 ```
 
-## Sécurité du conteneur
+## Container security
 
-Le conteneur du bot utilise un utilisateur non-root, un système de fichiers en
-lecture seule, un `/tmp` temporaire, aucune capability Linux et
-`no-new-privileges`. Les images Docker et les dépendances Python sont figées
-pour rendre les builds reproductibles.
+The bot container runs as a non-root user with a read-only filesystem, a
+temporary `/tmp`, no Linux capabilities, and `no-new-privileges`. Docker
+images and Python dependencies are pinned for reproducible builds.

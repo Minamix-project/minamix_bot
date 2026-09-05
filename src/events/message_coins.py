@@ -83,7 +83,7 @@ async def register(bot):
 
         now = time.time()
 
-        # Update last_seen (debounced every 5 min)
+        # Update last_seen (debounced every 5 minutes).
         activity_key = (message.guild.id, message.author.id)
         if now - _last_seen_update.get(activity_key, 0) >= SEEN_DEBOUNCE:
             _last_seen_update[activity_key] = now
@@ -99,7 +99,7 @@ async def register(bot):
                     )
                 await db.commit()
             except Exception:
-                logger.exception("Impossible de mettre à jour l'activité de guild=%s user=%s", message.guild.id, message.author.id)
+                logger.exception("Could not update activity guild=%s user=%s", message.guild.id, message.author.id)
             finally:
                 if db is not None:
                     db.close()
@@ -135,7 +135,7 @@ async def register(bot):
             db = await get_db_connection()
             await modify_user_balance(db, message.guild.id, message.author.id, gain, "add", type_="message")
         except Exception:
-            logger.exception("Échec du gain par message guild=%s user=%s", message.guild.id, message.author.id)
+            logger.exception("Message reward failed guild=%s user=%s", message.guild.id, message.author.id)
         finally:
             if db is not None:
                 db.close()

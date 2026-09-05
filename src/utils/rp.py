@@ -8,7 +8,7 @@ _prefix_cache: dict[int, dict[str, tuple]] = {}
 
 
 def has_rp_permission(member) -> bool:
-    # Import local pour éviter une dépendance circulaire au chargement.
+    # Import locally to avoid a circular dependency during module loading.
     from src.utils.permissions import is_rp_manager
     return is_rp_manager(member)
 

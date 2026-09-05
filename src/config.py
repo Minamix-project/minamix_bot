@@ -14,9 +14,9 @@ def _integer_set_from_env(name: str, defaults: list[int]) -> set[int]:
     try:
         values = {int(value.strip()) for value in raw.split(",") if value.strip()}
     except ValueError as exc:
-        raise RuntimeError(f"{name} doit contenir uniquement des IDs séparés par des virgules") from exc
+        raise RuntimeError(f"{name} must contain only comma-separated IDs") from exc
     if not values:
-        raise RuntimeError(f"{name} ne peut pas être vide")
+        raise RuntimeError(f"{name} cannot be empty")
     return values
 
 
