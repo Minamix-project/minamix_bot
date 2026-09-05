@@ -1,9 +1,9 @@
-from src.utils.permissions import rp_only
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import has_rp_permission, invalidate_cache
+from src.utils.rp import invalidate_cache
 
 
 async def register(bot):
@@ -14,7 +14,7 @@ async def register(bot):
         prefix="Préfixe pour faire parler le personnage (ex: Aria:)",
         image="Image du personnage (fichier)",
     )
-    @rp_only()
+    @admin_only()
     async def rpcreate(
         interaction: Interaction,
         user: Member,
@@ -22,12 +22,6 @@ async def register(bot):
         prefix: str,
         image: discord.Attachment,
     ):
-        if not has_rp_permission(interaction.user):
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if not image.content_type or not image.content_type.startswith("image/"):
             embed = discord.Embed(
                 title="❌ Fichier invalide",

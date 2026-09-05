@@ -21,12 +21,3 @@ def _integer_set_from_env(name: str, defaults: list[int]) -> set[int]:
 
 
 GUILD_IDS = _integer_set_from_env("DISCORD_GUILD_IDS", _DEFAULT_GUILD_IDS)
-RP_ALLOWED_ROLE_IDS = _integer_set_from_env(
-    "RP_ALLOWED_ROLE_IDS",
-    [
-        1437105432291315806,
-        1437105432291315805,
-        1437105432278728784,
-        1507492860956774633,
-    ],
-)

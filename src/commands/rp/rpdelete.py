@@ -1,10 +1,10 @@
-from src.utils.permissions import rp_only
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import has_rp_permission, invalidate_cache
+from src.utils.rp import invalidate_cache
 from src.utils.views import ExpiringView
 from src.utils.confirm import confirm_action
 
@@ -12,14 +12,8 @@ from src.utils.confirm import confirm_action
 async def register(bot):
     @bot.tree.command(name="rpdelete", description="Supprimer un personnage RP")
     @app_commands.describe(user="Utilisateur propriétaire du personnage")
-    @rp_only()
+    @admin_only()
     async def rpdelete(interaction: Interaction, user: Member):
-        if not has_rp_permission(interaction.user):
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         db = await get_db_connection()
         cursor = await db.cursor()
         await cursor.execute(

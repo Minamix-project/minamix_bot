@@ -46,7 +46,6 @@ bot running.
 | --- | --- | --- | --- |
 | `DISCORD_TOKEN` | yes | — | Secret Discord bot token |
 | `DISCORD_GUILD_IDS` | no | project defaults | Comma-separated allowed guild IDs |
-| `RP_ALLOWED_ROLE_IDS` | no | project defaults | Comma-separated RP manager role IDs |
 | `DB_HOST` | yes | — | MySQL host, usually `db` in Compose |
 | `DB_PORT` | no | `3306` | MySQL port |
 | `DB_NAME` | yes | — | Database name |
@@ -70,8 +69,9 @@ passwords for `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and
 ## Permissions
 
 Administrative commands require **Manage Server** or **Administrator**. RP
-management commands also accept roles listed in `RP_ALLOWED_ROLE_IDS`. These
-rules are enforced both by Discord command visibility and by the bot at runtime.
+RP management commands use the same **Manage Server** or **Administrator**
+permission. These rules are enforced both by Discord command visibility and by
+the bot at runtime.
 
 ## Commands
 
@@ -146,10 +146,10 @@ receive a short reference and can be sent to the channel configured with
 | `/roll <expression>` | Roll dice; use `/roll help` for syntax |
 | `/rplist [user] [page]` | List characters |
 | `/rpbourse [user]` | Show a character's Nax balance |
-| `/rpcreate <user> <name> <prefix> <image>` | Create a character — RP manager |
-| `/rpedit <user>` | Edit a name or prefix — RP manager |
-| `/rpimage <user> <image>` | Change an image — RP manager |
-| `/rpdelete <user>` | Delete a character — RP manager |
+| `/rpcreate <user> <name> <prefix> <image>` | Create a character — admin |
+| `/rpedit <user>` | Edit a name or prefix — admin |
+| `/rpimage <user> <image>` | Change an image — admin |
+| `/rpdelete <user>` | Delete a character — admin |
 | `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |
