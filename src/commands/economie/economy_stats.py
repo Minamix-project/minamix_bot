@@ -19,11 +19,13 @@ async def register(bot):
         total_users, total_supply, avg_balance, min_balance, max_balance = (await cursor.fetchone())
         total_supply = total_supply or 0
         avg_balance = avg_balance or 0
+        min_balance = min_balance or 0
+        max_balance = max_balance or 0
 
         await cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance", (interaction.guild_id,))
         all_balances = [row[0] for row in (await cursor.fetchall())]
         n = len(all_balances)
-        median = all_balances[n // 2] if n else 0
+        median = ((all_balances[n // 2 - 1] + all_balances[n // 2]) / 2) if n and n % 2 == 0 else (all_balances[n // 2] if n else 0)
 
         await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance = 0", (interaction.guild_id,))
         broke_users = (await cursor.fetchone())[0]

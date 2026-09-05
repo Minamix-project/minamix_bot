@@ -14,8 +14,8 @@ status:
 	docker compose ps
 
 test:
-	python -m pytest -q
+	python3 -m pytest -q
 
 lint:
-	python -m ruff check .
-	python -m compileall -q main.py src tests
+	python3 -m ruff check .
+	python3 -m compileall -q main.py src tests

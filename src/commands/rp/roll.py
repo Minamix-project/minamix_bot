@@ -2,6 +2,7 @@ import discord
 from discord import Interaction, app_commands
 from src.utils.dice import roll as dice_roll, get_help, ParseError
 from src.utils.embed import set_bot_footer
+from src.utils.error_reporting import report_error
 
 
 async def register(bot):
@@ -20,8 +21,16 @@ async def register(bot):
 
         try:
             output, private = dice_roll(expression)
-        except Exception as e:
+        except ParseError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        except Exception as exc:
+            ref = await report_error(
+                bot, guild_ids=interaction.guild_id, source="/roll", error=exc, user=interaction.user
+            )
+            await interaction.response.send_message(
+                f"❌ Une erreur interne est survenue. Référence : `{ref}`", ephemeral=True
+            )
             return
 
         embed = discord.Embed(description=output, color=discord.Color.blurple())

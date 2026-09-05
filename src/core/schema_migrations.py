@@ -8,6 +8,9 @@ mechanism to use for any future schema change (new table, ALTER, backfill...).
 """
 
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 MIGRATIONS_DIR = Path("src/migrations")
 
@@ -41,10 +44,10 @@ async def run_schema_migrations(db) -> None:
                     (version, sql_file.name),
                 )
                 await db.commit()
-                print(f"[MIGRATION] Applied {version}")
-            except Exception as exc:
+                logger.info("Applied migration %s", version)
+            except Exception:
                 await db.rollback()
-                print(f"[MIGRATION ERROR] {version}: {exc}")
+                logger.exception("Migration failed: %s", version)
                 raise
     finally:
         await cursor.close()
