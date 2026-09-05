@@ -16,14 +16,17 @@ async def register(bot):
         await interaction.response.defer(ephemeral=True)
         db_ok = False
         db_error = None
+        db = None
         try:
             db = await get_db_connection()
             async with db.cursor() as cursor:
                 await cursor.execute("SELECT 1")
                 db_ok = (await cursor.fetchone())[0] == 1
-            db.close()
         except Exception as exc:
             db_error = type(exc).__name__
+        finally:
+            if db is not None:
+                db.close()
 
         embed = discord.Embed(
             title="🩺 État du bot",

@@ -2,6 +2,7 @@ from discord import Interaction, Member, Embed, app_commands
 import discord
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
+from src.utils.permissions import is_admin
 from src.utils.format import format_amount
 from src.utils.pagination import PaginationView
 
@@ -23,7 +24,7 @@ async def register(bot):
     @app_commands.describe(user="Utilisateur (toi par défaut, admin requis pour un autre membre)")
     async def transactions(interaction: Interaction, user: Member = None):
         target = user or interaction.user
-        if user is not None and user.id != interaction.user.id and not interaction.user.guild_permissions.administrator:
+        if user is not None and user.id != interaction.user.id and not is_admin(interaction.user):
             embed = discord.Embed(
                 title="❌ Permission refusée",
                 description="Seul un administrateur peut consulter l'historique d'un autre membre.",

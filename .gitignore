@@ -1,6 +1,7 @@
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -27,3 +28,7 @@ Thumbs.db
 *.log
 backups/
 backup_test_status/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

@@ -1,8 +1,11 @@
 import discord
+import logging
 from discord import Message
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
 from src.config import GUILD_IDS
+
+logger = logging.getLogger(__name__)
 
 
 async def register(bot):
@@ -14,39 +17,40 @@ async def register(bot):
             return
 
         db = await get_db_connection()
-        cursor = await db.cursor()
-        await cursor.execute(
-            "SELECT 1 FROM antispam_channels WHERE guild_id = %s AND channel_id = %s",
-            (message.guild.id, message.channel.id)
-        )
-        is_antispam = (await cursor.fetchone()) is not None
-
-        if not is_antispam:
-            await cursor.close()
+        try:
+            async with db.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT 1 FROM antispam_channels WHERE guild_id = %s AND channel_id = %s",
+                    (message.guild.id, message.channel.id),
+                )
+                is_antispam = (await cursor.fetchone()) is not None
+                if not is_antispam:
+                    return
+                await cursor.execute(
+                    "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
+                    (message.guild.id,),
+                )
+                logs_result = await cursor.fetchone()
+        finally:
             db.close()
-            return
 
+        deleted = False
         try:
             await message.delete()
-        except Exception:
-            pass
+            deleted = True
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            logger.warning("Anti-spam message deletion denied guild=%s message=%s: %s", message.guild.id, message.id, exc)
 
+        banned = False
         try:
             await message.guild.ban(
                 message.author,
                 reason="Message posté dans un channel anti-spam",
                 delete_message_days=0
             )
-        except Exception:
-            pass
-
-        await cursor.execute(
-            "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
-            (message.guild.id,)
-        )
-        logs_result = (await cursor.fetchone())
-        await cursor.close()
-        db.close()
+            banned = True
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            logger.error("Anti-spam ban denied guild=%s user=%s: %s", message.guild.id, message.author.id, exc)
 
         if not logs_result:
             return
@@ -56,12 +60,16 @@ async def register(bot):
             return
 
         embed = discord.Embed(
-            title="🔨 Ban automatique — Anti-spam",
-            color=discord.Color.red()
+            title="🔨 Ban automatique — Anti-spam" if banned else "🚨 Échec du ban automatique",
+            color=discord.Color.red() if banned else discord.Color.orange(),
         )
         embed.add_field(name="Utilisateur", value=f"{message.author} (`{message.author.id}`)", inline=False)
         embed.add_field(name="Channel", value=f"<#{message.channel.id}>", inline=False)
         embed.add_field(name="Message", value=message.content[:500] if message.content else "*vide*", inline=False)
+        embed.add_field(name="Résultat", value=f"Message supprimé : {'oui' if deleted else 'non'}\nUtilisateur banni : {'oui' if banned else 'non'}", inline=False)
         embed.timestamp = message.created_at
 
-        await logs_channel.send(embed=embed)
+        try:
+            await logs_channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            logger.error("Anti-spam log delivery denied guild=%s: %s", message.guild.id, exc)

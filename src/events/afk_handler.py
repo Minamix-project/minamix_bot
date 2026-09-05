@@ -97,7 +97,7 @@ async def register(bot):
             if now - last >= REMIND_COOLDOWN:
                 _reminded[message.author.id] = now
 
-                view = ExpiringView(timeout=60)
+                view = ExpiringView(timeout=60, owner_id=message.author.id)
                 yes_btn = discord.ui.Button(label="Oui, je suis de retour", style=discord.ButtonStyle.green, emoji="👋")
                 no_btn = discord.ui.Button(label="Non, encore absent(e)", style=discord.ButtonStyle.grey, emoji="💤")
 

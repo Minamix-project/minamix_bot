@@ -4,10 +4,10 @@ import discord
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
 from src.utils.pagination import PaginationView
-from src.utils.permissions import ADMIN_COMMANDS, RP_MANAGER_COMMANDS
+from src.utils.permissions import ADMIN_COMMANDS
 
 PAGE_SIZE = 10
-_ALL_COMMANDS = sorted(ADMIN_COMMANDS | RP_MANAGER_COMMANDS)
+_ALL_COMMANDS = sorted(ADMIN_COMMANDS)
 
 
 async def _commande_autocomplete(interaction: Interaction, current: str):

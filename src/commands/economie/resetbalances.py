@@ -53,7 +53,7 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
         )
         set_bot_footer(embed, interaction)
 
-        view = ExpiringView(timeout=30)
+        view = ExpiringView(timeout=30, owner_id=interaction.user.id)
         yes_btn = Button(label="Oui, reset tout", style=discord.ButtonStyle.red, emoji="🚨")
         no_btn = Button(label="Non", style=discord.ButtonStyle.grey, emoji="❌")
 
@@ -118,7 +118,7 @@ async def register(bot):
         )
         set_bot_footer(embed, interaction)
 
-        view = ExpiringView(timeout=30)
+        view = ExpiringView(timeout=30, owner_id=interaction.user.id)
         continue_btn = Button(label="Continuer", style=discord.ButtonStyle.danger, emoji="⚠️")
         cancel_btn = Button(label="Annuler", style=discord.ButtonStyle.grey, emoji="❌")
 

@@ -25,7 +25,7 @@ async def confirm_action(
     embed = Embed(title=title, description="\n".join(summary_lines), color=color)
     set_bot_footer(embed, interaction)
 
-    view = ExpiringView(timeout=timeout)
+    view = ExpiringView(timeout=timeout, owner_id=interaction.user.id)
     confirm_btn = Button(label=confirm_label, style=discord.ButtonStyle.danger, emoji=confirm_emoji)
     cancel_btn = Button(label="Annuler", style=discord.ButtonStyle.grey, emoji="❌")
 

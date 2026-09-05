@@ -3,7 +3,7 @@ from discord import Interaction
 from discord.ui import Select
 
 from src.utils.embed import set_bot_footer
-from src.utils.permissions import is_admin, is_rp_manager
+from src.utils.permissions import is_admin
 
 
 _GENERAL = (
@@ -106,14 +106,13 @@ async def register(bot):
     @bot.tree.command(name="help", description="Afficher les commandes disponibles.")
     async def help(interaction: Interaction):
         admin = is_admin(interaction.user)
-        rp_manager = is_rp_manager(interaction.user)
 
         options = [
             discord.SelectOption(label="Pour commencer", value="general", emoji="👋"),
             discord.SelectOption(label="Économie", value="economy", emoji="💰"),
             discord.SelectOption(label="Roleplay", value="rp", emoji="🎭"),
         ]
-        if rp_manager:
+        if admin:
             options.append(discord.SelectOption(
                 label="Gestion RP", value="rp_management", emoji="📝"
             ))

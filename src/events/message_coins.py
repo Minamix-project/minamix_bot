@@ -1,5 +1,6 @@
 import time
 import random
+import logging
 import discord
 from discord import Message
 from src.utils.wallet import modify_user_balance
@@ -13,6 +14,7 @@ _last_seen_update: dict[tuple[int, int], float] = {}
 COOLDOWN = 60
 SEEN_DEBOUNCE = 300
 MIN_LENGTH = 5
+logger = logging.getLogger(__name__)
 
 _ignored_channels_cache: dict[int, tuple[float, set[int]]] = {}
 _IGNORED_CACHE_TTL = 60
@@ -81,42 +83,40 @@ async def register(bot):
 
         now = time.time()
 
-        # Update last_seen (debounced every 5 min)
+        # Update last_seen (debounced every 5 minutes).
         activity_key = (message.guild.id, message.author.id)
         if now - _last_seen_update.get(activity_key, 0) >= SEEN_DEBOUNCE:
             _last_seen_update[activity_key] = now
+            db = None
             try:
                 from src.utils.db import get_db_connection
                 db = await get_db_connection()
-                cursor = await db.cursor()
-                await cursor.execute(
-                    "INSERT INTO guild_member_activity (guild_id, user_id, last_seen) VALUES (%s, %s, NOW()) "
-                    "ON DUPLICATE KEY UPDATE last_seen = NOW()",
-                    (message.guild.id, message.author.id)
-                )
+                async with db.cursor() as cursor:
+                    await cursor.execute(
+                        "INSERT INTO guild_member_activity (guild_id, user_id, last_seen) VALUES (%s, %s, NOW()) "
+                        "ON DUPLICATE KEY UPDATE last_seen = NOW()",
+                        (message.guild.id, message.author.id),
+                    )
                 await db.commit()
-                await cursor.close()
-                db.close()
             except Exception:
-                pass
+                logger.exception("Could not update activity guild=%s user=%s", message.guild.id, message.author.id)
+            finally:
+                if db is not None:
+                    db.close()
 
         key = (message.guild.id, message.author.id)
 
         if now - _last_gain.get(key, 0) < COOLDOWN:
-            await bot.process_commands(message)
             return
 
         content = message.content or ""
         if len(content.strip()) < MIN_LENGTH:
-            await bot.process_commands(message)
             return
 
         if _is_low_effort(content) or content == _last_content.get(key):
-            await bot.process_commands(message)
             return
 
         if message.channel.id in await _get_ignored_channels(message.guild.id):
-            await bot.process_commands(message)
             return
 
         _last_gain[key] = now
@@ -129,12 +129,13 @@ async def register(bot):
             else random.randint(config["message_gain_min"], config["message_gain_max"])
         )
 
+        db = None
         try:
             from src.utils.db import get_db_connection
             db = await get_db_connection()
             await modify_user_balance(db, message.guild.id, message.author.id, gain, "add", type_="message")
-            db.close()
         except Exception:
-            pass
-
-        await bot.process_commands(message)
+            logger.exception("Message reward failed guild=%s user=%s", message.guild.id, message.author.id)
+        finally:
+            if db is not None:
+                db.close()

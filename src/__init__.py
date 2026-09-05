@@ -1,1 +1,1 @@
-# Paquet racine du bot (imports du type `from src.bot import ...`)
+# Bot root package (for imports such as `from src.bot import ...`).

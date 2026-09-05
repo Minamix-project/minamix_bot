@@ -134,7 +134,7 @@ async def register(bot):
             await inter.response.send_modal(_AfkDatesModal(reason=reason))
 
         select.callback = callback
-        view = ExpiringView(timeout=60)
+        view = ExpiringView(timeout=60, owner_id=interaction.user.id)
         view.add_item(select)
 
         await interaction.response.send_message(

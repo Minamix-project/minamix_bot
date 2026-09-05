@@ -14,8 +14,8 @@ PAGE_SIZE = 4
 
 def _render_items(numbered_items) -> list[str]:
     lines = []
-    standard = [(num, r, p, n) for num, r, p, n, ex in numbered_items if not ex]
-    exclusifs = [(num, r, p, n) for num, r, p, n, ex in numbered_items if ex]
+    standard = [(num, r, p, n) for num, _item, r, p, n, ex in numbered_items if not ex]
+    exclusifs = [(num, r, p, n) for num, _item, r, p, n, ex in numbered_items if ex]
     for num, role_id, prix, nom in standard:
         lines.append(f"》 **#{num}** — {format_amount(prix)}💰 : <@&{role_id}>")
     if exclusifs:
@@ -54,11 +54,11 @@ class ShopView(discord.ui.View):
 
     def _build(self) -> None:
         self.clear_items()
-        for num, role_id, prix, nom, _exclusif in self._page_slice():
+        for num, item_id, role_id, prix, nom, _exclusif in self._page_slice():
             button = discord.ui.Button(label=f"Acheter #{num}", style=discord.ButtonStyle.green, row=0)
 
-            async def _callback(inter: Interaction, role_id=role_id, prix=prix, nom=nom):
-                await show_purchase_confirmation(inter, role_id, prix, nom, edit=True)
+            async def _callback(inter: Interaction, item_id=item_id, role_id=role_id, prix=prix, nom=nom):
+                await show_purchase_confirmation(inter, item_id, role_id, prix, nom, edit=True)
 
             button.callback = _callback
             self.add_item(button)
@@ -108,8 +108,8 @@ async def register(bot):
         color = _HIBISCUS if is_hibiscus else random.choice(_COLORS[:-1])
 
         numbered_items = [
-            (num, role_id, prix, nom, exclusif)
-            for num, (_id, role_id, prix, nom, _desc, exclusif) in enumerate(items, start=1)
+            (num, item_id, role_id, prix, nom, exclusif)
+            for num, (item_id, role_id, prix, nom, _desc, exclusif) in enumerate(items, start=1)
         ]
 
         view = ShopView(numbered_items, color, interaction.client.user)

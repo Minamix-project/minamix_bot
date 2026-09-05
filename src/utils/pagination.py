@@ -4,7 +4,7 @@ import discord
 
 
 class PaginationView(discord.ui.View):
-    """Navigation entre plusieurs embeds, réservée à l'auteur de la commande."""
+    """Navigate through multiple embeds; only the command author may interact."""
 
     def __init__(self, owner_id: int, total_pages: int,
                  render_page: Callable[[int], discord.Embed],

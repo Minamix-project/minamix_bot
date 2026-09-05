@@ -7,7 +7,7 @@ _pool: aiomysql.Pool | None = None
 
 
 class PooledConnection:
-    """Connexion aiomysql rendue au pool lorsque close() est appelé."""
+    """aiomysql connection returned to the pool when close() is called."""
 
     def __init__(self, pool: aiomysql.Pool, connection: aiomysql.Connection):
         self._pool = pool
@@ -45,13 +45,13 @@ async def create_db_pool() -> aiomysql.Pool:
             pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SECONDS", 1800)),
             connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", 10)),
         )
-        print(f"[DB] Pool MySQL prêt ({_pool.minsize}-{_pool.maxsize} connexions)")
+        print(f"[DB] MySQL pool ready ({_pool.minsize}-{_pool.maxsize} connections)")
     return _pool
 
 
 async def get_db_connection() -> PooledConnection:
     if _pool is None:
-        raise RuntimeError("Le pool MySQL n'est pas initialisé")
+        raise RuntimeError("The MySQL pool is not initialized")
     connection = await _pool.acquire()
     return PooledConnection(_pool, connection)
 
@@ -62,4 +62,4 @@ async def close_db_pool() -> None:
         _pool.close()
         await _pool.wait_closed()
         _pool = None
-        print("[DB] Pool MySQL fermé")
+        print("[DB] MySQL pool closed")

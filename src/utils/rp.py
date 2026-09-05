@@ -1,20 +1,7 @@
 from src.utils.db import get_db_connection
 
-RP_ALLOWED_ROLES = {
-    1437105432291315806,
-    1437105432291315805,
-    1437105432278728784,
-    1507492860956774633,
-}
-
 # guild_id -> {prefix: (char_id, user_id, name, image_url)}
 _prefix_cache: dict[int, dict[str, tuple]] = {}
-
-
-def has_rp_permission(member) -> bool:
-    # Import local pour éviter une dépendance circulaire au chargement.
-    from src.utils.permissions import is_rp_manager
-    return is_rp_manager(member)
 
 
 async def get_prefix_cache(guild_id: int) -> dict[str, tuple]:

@@ -1,10 +1,10 @@
-from src.utils.permissions import rp_only
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import has_rp_permission, invalidate_cache
+from src.utils.rp import invalidate_cache
 from src.utils.views import ExpiringView
 
 
@@ -14,14 +14,8 @@ async def register(bot):
         user="Utilisateur propriétaire du personnage",
         image="Nouvelle image (fichier)",
     )
-    @rp_only()
+    @admin_only()
     async def rpimage(interaction: Interaction, user: Member, image: discord.Attachment):
-        if not has_rp_permission(interaction.user):
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if not image.content_type or not image.content_type.startswith("image/"):
             embed = discord.Embed(
                 title="❌ Fichier invalide",
@@ -96,7 +90,7 @@ async def register(bot):
             await inter.edit_original_response(embed=embed)
 
         select.callback = on_select
-        view = ExpiringView()
+        view = ExpiringView(owner_id=interaction.user.id)
         view.add_item(select)
 
         embed = discord.Embed(

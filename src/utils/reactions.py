@@ -1,4 +1,5 @@
 import os
+import logging
 import discord
 from discord import Message
 from src.utils.db import get_db_connection
@@ -12,6 +13,7 @@ EGGS = {
     "l_hibiscus":    "L'Hibiscus",
     "l_insomniaque": "L'Insomniaque",
 }
+logger = logging.getLogger(__name__)
 
 
 async def _mark_found(user_id: int, key: str) -> None:
@@ -26,7 +28,7 @@ async def _mark_found(user_id: int, key: str) -> None:
         await cursor.close()
         db.close()
     except Exception:
-        pass
+        logger.exception("Could not save discovery user=%s key=%s", user_id, key)
 
 
 async def handle(message: Message) -> None:

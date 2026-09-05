@@ -6,7 +6,7 @@ from pathlib import Path
 async def load_modules(bot, directory: str, label: str):
     base = Path(directory)
     if not base.exists():
-        print(f"[WARN] Dossier '{directory}' introuvable.")
+        print(f"[WARN] Directory '{directory}' not found.")
         return
 
     for path in sorted(base.rglob("*.py")):
@@ -23,4 +23,5 @@ async def load_modules(bot, directory: str, label: str):
                 await fn(bot) if asyncio.iscoroutinefunction(fn) else fn(bot)
                 print(f"[{label}] {module_name}")
         except Exception as e:
-            print(f"[ERREUR] {module_name}: {e}")
+            print(f"[ERROR] {module_name}: {e}")
+            raise
