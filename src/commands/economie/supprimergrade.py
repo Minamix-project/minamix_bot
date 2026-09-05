@@ -24,7 +24,7 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        items = get_shop_items(interaction.guild_id)
+        items = await get_shop_items(interaction.guild_id)
 
         if numero < 1 or numero > len(items):
             embed = discord.Embed(
@@ -50,11 +50,11 @@ async def register(bot):
         cancel_btn = Button(label="Annuler", style=discord.ButtonStyle.grey, emoji="❌")
 
         async def confirm_callback(inter: Interaction):
-            db2 = get_db_connection()
-            cursor2 = db2.cursor()
-            cursor2.execute("DELETE FROM guild_boutique_roles WHERE id = %s", (actual_id,))
-            db2.commit()
-            cursor2.close()
+            db2 = await get_db_connection()
+            cursor2 = await db2.cursor()
+            await cursor2.execute("DELETE FROM guild_boutique_roles WHERE id = %s", (actual_id,))
+            await db2.commit()
+            await cursor2.close()
             db2.close()
 
             result_embed = discord.Embed(

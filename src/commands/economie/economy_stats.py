@@ -16,38 +16,38 @@ async def register(bot):
 
         await interaction.response.defer()
 
-        db = get_db_connection()
-        cursor = db.cursor()
+        db = await get_db_connection()
+        cursor = await db.cursor()
 
-        cursor.execute("SELECT COUNT(*), SUM(balance), AVG(balance), MIN(balance), MAX(balance) FROM guild_wallets WHERE guild_id = %s", (interaction.guild_id,))
-        total_users, total_supply, avg_balance, min_balance, max_balance = cursor.fetchone()
+        await cursor.execute("SELECT COUNT(*), SUM(balance), AVG(balance), MIN(balance), MAX(balance) FROM guild_wallets WHERE guild_id = %s", (interaction.guild_id,))
+        total_users, total_supply, avg_balance, min_balance, max_balance = (await cursor.fetchone())
         total_supply = total_supply or 0
         avg_balance = avg_balance or 0
 
-        cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance", (interaction.guild_id,))
-        all_balances = [row[0] for row in cursor.fetchall()]
+        await cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance", (interaction.guild_id,))
+        all_balances = [row[0] for row in (await cursor.fetchall())]
         n = len(all_balances)
         median = all_balances[n // 2] if n else 0
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance = 0", (interaction.guild_id,))
-        broke_users = cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance = 0", (interaction.guild_id,))
+        broke_users = (await cursor.fetchone())[0]
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1 AND 999", (interaction.guild_id,))
-        tier1 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1000 AND 9999", (interaction.guild_id,))
-        tier2 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 10000 AND 49999", (interaction.guild_id,))
-        tier3 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= 50000", (interaction.guild_id,))
-        tier4 = cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1 AND 999", (interaction.guild_id,))
+        tier1 = (await cursor.fetchone())[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1000 AND 9999", (interaction.guild_id,))
+        tier2 = (await cursor.fetchone())[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 10000 AND 49999", (interaction.guild_id,))
+        tier3 = (await cursor.fetchone())[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= 50000", (interaction.guild_id,))
+        tier4 = (await cursor.fetchone())[0]
 
-        cursor.execute("SELECT MIN(prix), MAX(prix), AVG(prix), COUNT(*) FROM guild_boutique_roles WHERE guild_id = %s", (interaction.guild_id,))
-        shop_min, shop_max, shop_avg, shop_count = cursor.fetchone()
+        await cursor.execute("SELECT MIN(prix), MAX(prix), AVG(prix), COUNT(*) FROM guild_boutique_roles WHERE guild_id = %s", (interaction.guild_id,))
+        shop_min, shop_max, shop_avg, shop_count = (await cursor.fetchone())
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= (SELECT MIN(prix) FROM guild_boutique_roles WHERE guild_id = %s)", (interaction.guild_id, interaction.guild_id))
-        can_afford = cursor.fetchone()[0]
+        await cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= (SELECT MIN(prix) FROM guild_boutique_roles WHERE guild_id = %s)", (interaction.guild_id, interaction.guild_id))
+        can_afford = (await cursor.fetchone())[0]
 
-        cursor.close()
+        await cursor.close()
         db.close()
 
         active_users = total_users - broke_users

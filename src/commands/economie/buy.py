@@ -9,17 +9,17 @@ from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
 
 
-def _get_items(guild_id: int):
+async def _get_items(guild_id: int):
     from src.utils.shop import get_shop_items
-    return get_shop_items(guild_id)
+    return await get_shop_items(guild_id)
 
 
 async def _send_purchase_log(interaction, role, prix, success: bool, detail: str):
-    db = get_db_connection()
+    db = await get_db_connection()
     try:
-        with db.cursor() as cursor:
-            cursor.execute("SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'", (interaction.guild_id,))
-            row = cursor.fetchone()
+        async with db.cursor() as cursor:
+            await cursor.execute("SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'", (interaction.guild_id,))
+            row = (await cursor.fetchone())
     finally:
         db.close()
     if not row:
@@ -45,21 +45,21 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
         await interaction.edit_original_response(content=f"❌ Tu possèdes déjà {role.mention}.", view=None)
         return
 
-    db = get_db_connection()
+    db = await get_db_connection()
     role_added = False
     try:
-        db.begin()
-        with db.cursor() as cursor:
-            cursor.execute(
+        await db.begin()
+        async with db.cursor() as cursor:
+            await cursor.execute(
                 "INSERT INTO guild_wallets (guild_id, user_id, balance) VALUES (%s, %s, 0) "
                 "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
                 (interaction.guild_id, interaction.user.id),
             )
-            cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s AND user_id = %s FOR UPDATE", (interaction.guild_id, interaction.user.id))
-            current_balance = cursor.fetchone()[0]
+            await cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s AND user_id = %s FOR UPDATE", (interaction.guild_id, interaction.user.id))
+            current_balance = (await cursor.fetchone())[0]
 
             if current_balance < prix:
-                db.rollback()
+                await db.rollback()
                 embed = Embed(
                     title="❌ Solde insuffisant",
                     description=f"Tu as **{format_amount(current_balance)}💰** mais cet article coûte **{format_amount(prix)}💰**.",
@@ -73,22 +73,22 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
                 await interaction.user.add_roles(role, reason=f"Achat boutique : {nom_role}")
                 role_added = True
             except (discord.Forbidden, discord.HTTPException):
-                db.rollback()
+                await db.rollback()
                 await interaction.edit_original_response(
                     content="❌ Impossible d'attribuer ce rôle. Aucun coin n'a été retiré.", view=None
                 )
                 await _send_purchase_log(interaction, role, prix, False, "Attribution Discord refusée; aucun débit.")
                 return
 
-            cursor.execute(
+            await cursor.execute(
                 "UPDATE guild_wallets SET balance = balance - %s WHERE guild_id = %s AND user_id = %s AND balance >= %s",
                 (prix, interaction.guild_id, interaction.user.id, prix),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Le solde a changé pendant l'achat.")
-        db.commit()
+        await db.commit()
     except Exception as exc:
-        db.rollback()
+        await db.rollback()
         if role_added:
             try:
                 await interaction.user.remove_roles(role, reason="Annulation d'un achat boutique échoué")
@@ -150,7 +150,7 @@ async def register(bot):
     @bot.tree.command(name="buy", description="Acheter un rôle dans la boutique.")
     @app_commands.describe(numero="Numéro de l'article (laisser vide pour voir la liste)")
     async def buy(interaction: Interaction, numero: int = None):
-        items = _get_items(interaction.guild_id)
+        items = await _get_items(interaction.guild_id)
 
         if not items:
             await interaction.response.send_message("La boutique est vide.", ephemeral=True)

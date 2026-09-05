@@ -33,7 +33,7 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
+        db = await get_db_connection()
         new_balance = await modify_user_balance(db, interaction.guild_id, user.id, montant, "add")
 
         embed = create_balance_embed(user, new_balance, interaction)

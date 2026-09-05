@@ -30,14 +30,14 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT id, name, prefix FROM rp_characters WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, user.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:
@@ -74,14 +74,14 @@ async def register(bot):
             )
             stable_url = msg.attachments[0].url if msg.attachments else image.url
 
-            db2 = get_db_connection()
-            cursor2 = db2.cursor()
-            cursor2.execute(
+            db2 = await get_db_connection()
+            cursor2 = await db2.cursor()
+            await cursor2.execute(
                 "UPDATE rp_characters SET image_url = %s WHERE id = %s",
                 (stable_url, char_id)
             )
-            db2.commit()
-            cursor2.close()
+            await db2.commit()
+            await cursor2.close()
             db2.close()
             invalidate_cache(inter.guild.id)
 
@@ -108,14 +108,14 @@ async def register(bot):
 
 
 async def _get_rp_channel(bot, guild_id: int):
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'rp_channel'",
         (guild_id,)
     )
-    row = cursor.fetchone()
-    cursor.close()
+    row = (await cursor.fetchone())
+    await cursor.close()
     db.close()
     if row:
         return bot.get_channel(int(row[0]))

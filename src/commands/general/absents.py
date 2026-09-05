@@ -15,15 +15,15 @@ async def register(bot):
 
         await interaction.response.defer()
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT user_id, start_time, end_time FROM afk_users "
             "WHERE guild_id = %s ORDER BY start_time ASC",
             (interaction.guild.id,)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

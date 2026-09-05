@@ -16,19 +16,19 @@ async def register(bot):
             return
         await interaction.response.defer()
 
-        db = get_db_connection()
-        cursor = db.cursor()
+        db = await get_db_connection()
+        cursor = await db.cursor()
 
-        cursor.execute("SELECT last_seen FROM users WHERE user_id = %s", (user.id,))
-        seen_row = cursor.fetchone()
+        await cursor.execute("SELECT last_seen FROM users WHERE user_id = %s", (user.id,))
+        seen_row = (await cursor.fetchone())
 
-        cursor.execute(
+        await cursor.execute(
             "SELECT reason, start_time, end_time FROM afk_users WHERE user_id = %s AND guild_id = %s",
             (user.id, interaction.guild.id)
         )
-        afk_row = cursor.fetchone()
+        afk_row = (await cursor.fetchone())
 
-        cursor.close()
+        await cursor.close()
         db.close()
 
         embed = discord.Embed(

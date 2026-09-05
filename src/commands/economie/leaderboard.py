@@ -16,14 +16,14 @@ async def register(bot):
     async def leaderboard(interaction: Interaction, page: int = 1):
         await interaction.response.defer()
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT user_id, balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance DESC LIMIT 100"
             , (interaction.guild_id,)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

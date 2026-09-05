@@ -22,7 +22,7 @@ async def register(bot):
         description="Affiche la boutique des rôles disponibles."
     )
     async def boutique(interaction: Interaction):
-        items = get_shop_items(interaction.guild_id)
+        items = await get_shop_items(interaction.guild_id)
 
         if not items:
             embed = discord.Embed(
@@ -60,7 +60,7 @@ async def register(bot):
         await interaction.response.send_message(embed=embed)
 
         if is_hibiscus:
-            _mark_found(interaction.user.id, "l_hibiscus")
+            await _mark_found(interaction.user.id, "l_hibiscus")
             await interaction.followup.send(
                 "🌺 Ta boutique prend la couleur de l'hibiscus. Tu as débloqué un nouveau trophée secret. Utilise `/discoveries` pour le voir.",
                 ephemeral=True

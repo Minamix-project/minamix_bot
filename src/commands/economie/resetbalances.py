@@ -44,13 +44,13 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
         no_btn = Button(label="Non", style=discord.ButtonStyle.grey, emoji="❌")
 
         async def yes_callback(inter: Interaction):
-            db = get_db_connection()
-            cursor = db.cursor()
-            cursor.execute("UPDATE guild_wallets SET balance = 0 WHERE guild_id = %s", (inter.guild_id,))
+            db = await get_db_connection()
+            cursor = await db.cursor()
+            await cursor.execute("UPDATE guild_wallets SET balance = 0 WHERE guild_id = %s", (inter.guild_id,))
             count = cursor.rowcount
-            cursor.execute("UPDATE guild_work_cooldowns SET last_work = 0 WHERE guild_id = %s", (inter.guild_id,))
-            db.commit()
-            cursor.close()
+            await cursor.execute("UPDATE guild_work_cooldowns SET last_work = 0 WHERE guild_id = %s", (inter.guild_id,))
+            await db.commit()
+            await cursor.close()
             db.close()
 
             result_embed = discord.Embed(

@@ -26,7 +26,7 @@ async def register(bot):
             from src.utils.reactions import _mark_found
             now_time = datetime.now().time()
             if 1 <= now_time.hour < 5:
-                _mark_found(message.author.id, "l_insomniaque")
+                await _mark_found(message.author.id, "l_insomniaque")
                 await message.reply("T'as vraiment que ça à faire à cette heure-ci ?")
             else:
                 await message.reply("Tu veux quoi toi ?")
@@ -41,15 +41,15 @@ async def register(bot):
             _last_seen_update[message.author.id] = now
             try:
                 from src.utils.db import get_db_connection
-                db = get_db_connection()
-                cursor = db.cursor()
-                cursor.execute(
+                db = await get_db_connection()
+                cursor = await db.cursor()
+                await cursor.execute(
                     "INSERT INTO users (user_id, last_seen) VALUES (%s, NOW()) "
                     "ON DUPLICATE KEY UPDATE last_seen = NOW()",
                     (message.author.id,)
                 )
-                db.commit()
-                cursor.close()
+                await db.commit()
+                await cursor.close()
                 db.close()
             except Exception:
                 pass
@@ -63,7 +63,7 @@ async def register(bot):
 
         try:
             from src.utils.db import get_db_connection
-            db = get_db_connection()
+            db = await get_db_connection()
             await modify_user_balance(db, message.guild.id, message.author.id, gain, "add")
             db.close()
         except Exception:

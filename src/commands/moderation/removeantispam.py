@@ -14,15 +14,15 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "DELETE FROM antispam_channels WHERE guild_id = %s AND channel_id = %s",
             (interaction.guild.id, channel.id)
         )
         affected = cursor.rowcount
-        db.commit()
-        cursor.close()
+        await db.commit()
+        await cursor.close()
         db.close()
 
         if affected == 0:

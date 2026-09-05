@@ -17,14 +17,14 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT id, name, prefix FROM rp_characters WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, user.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:
@@ -52,11 +52,11 @@ async def register(bot):
 
             _, char_name, char_prefix = char
 
-            db2 = get_db_connection()
-            cursor2 = db2.cursor()
-            cursor2.execute("DELETE FROM rp_characters WHERE id = %s", (char_id,))
-            db2.commit()
-            cursor2.close()
+            db2 = await get_db_connection()
+            cursor2 = await db2.cursor()
+            await cursor2.execute("DELETE FROM rp_characters WHERE id = %s", (char_id,))
+            await db2.commit()
+            await cursor2.close()
             db2.close()
             invalidate_cache(inter.guild.id)
 

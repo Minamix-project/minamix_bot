@@ -14,16 +14,16 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT 1 FROM antispam_channels WHERE guild_id = %s AND channel_id = %s",
             (interaction.guild.id, channel.id)
         )
-        already = cursor.fetchone()
+        already = (await cursor.fetchone())
 
         if already:
-            cursor.close()
+            await cursor.close()
             db.close()
             embed = discord.Embed(
                 title="⚠️ Déjà en anti-spam",
@@ -34,12 +34,12 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        cursor.execute(
+        await cursor.execute(
             "INSERT INTO antispam_channels (guild_id, channel_id) VALUES (%s, %s)",
             (interaction.guild.id, channel.id)
         )
-        db.commit()
-        cursor.close()
+        await db.commit()
+        await cursor.close()
         db.close()
 
         embed = discord.Embed(

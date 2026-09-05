@@ -11,15 +11,15 @@ async def register(bot):
     async def rplist(interaction: Interaction, user: Member = None, page: int = 1):
         target = user or interaction.user
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT name, prefix, image_url, created_at FROM rp_characters "
             "WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, target.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

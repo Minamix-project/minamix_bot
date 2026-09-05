@@ -1,7 +1,6 @@
 import os
 import asyncio
 from dotenv import load_dotenv
-import pymysql
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -9,7 +8,7 @@ from discord import app_commands
 from src.config import GUILD_IDS
 from src.core.db_init import init_db
 from src.core.loader import load_modules
-from src.utils.db import get_db_connection
+from src.utils.db import close_db_pool, create_db_pool, get_db_connection
 from src.utils.permissions import ADMIN_COMMANDS, configure_command_permissions
 from src.utils.audit import record_admin_action
 
@@ -21,16 +20,12 @@ def run_bot():
 async def _main():
     load_dotenv()
 
-    db = pymysql.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-        port=int(os.getenv("DB_PORT", 3306)),
-        charset="utf8mb4",
-        autocommit=True,
-    )
-    init_db(db)
+    await create_db_pool()
+    db = await get_db_connection()
+    try:
+        await init_db(db)
+    finally:
+        db.close()
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:
@@ -67,14 +62,14 @@ async def _main():
         if os.getenv("DEPLOY_NOTIFICATION") != "1":
             return
         for guild_id in GUILD_IDS:
-            db = get_db_connection()
+            db = await get_db_connection()
             try:
-                with db.cursor() as cursor:
-                    cursor.execute(
+                async with db.cursor() as cursor:
+                    await cursor.execute(
                         "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
                         (guild_id,),
                     )
-                    row = cursor.fetchone()
+                    row = (await cursor.fetchone())
             finally:
                 db.close()
             if not row:
@@ -93,7 +88,7 @@ async def _main():
     async def on_app_command_completion(interaction, command):
         if command.name in ADMIN_COMMANDS and interaction.guild_id:
             try:
-                record_admin_action(interaction.guild_id, interaction.user.id, command.name)
+                await record_admin_action(interaction.guild_id, interaction.user.id, command.name)
             except Exception as exc:
                 print(f"[AUDIT] {exc}")
 
@@ -126,6 +121,8 @@ async def _main():
         await bot.start(token)
     except KeyboardInterrupt:
         await bot.close()
+    finally:
+        await close_db_pool()
 
 
 if __name__ == "__main__":

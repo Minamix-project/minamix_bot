@@ -25,6 +25,9 @@ A Discord bot with an economy system, shop, moderation tools, ...
    DB_PASSWORD=minamix
    DB_NAME=minamix
    DB_PORT=3306
+   DB_POOL_MIN_SIZE=1
+   DB_POOL_MAX_SIZE=10
+   DB_POOL_RECYCLE_SECONDS=1800
    ```
 
 3. Start the bot:
@@ -33,6 +36,8 @@ A Discord bot with an economy system, shop, moderation tools, ...
    make deploy
    ```
 
+MySQL access uses an asynchronous connection pool. These pool settings are
+optional and already use the displayed values by default.
 The database is initialized automatically on first start.
 
 ## Commands

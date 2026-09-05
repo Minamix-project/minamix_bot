@@ -42,15 +42,15 @@ async def register(bot):
 
 
 async def _pick_character(interaction: Interaction, user: Member, montant: int, action: str):
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "SELECT id, name, nax_balance FROM rp_characters "
         "WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
         (interaction.guild.id, user.id)
     )
-    rows = cursor.fetchall()
-    cursor.close()
+    rows = (await cursor.fetchall())
+    await cursor.close()
     db.close()
 
     if not rows:
@@ -116,14 +116,14 @@ async def _apply(interaction: Interaction, user: Member, char_id: int, char_name
     delta = montant if action == "add" else -montant
     new_balance = balance + delta
 
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "UPDATE rp_characters SET nax_balance = %s WHERE id = %s",
         (new_balance, char_id)
     )
-    db.commit()
-    cursor.close()
+    await db.commit()
+    await cursor.close()
     db.close()
 
     formatted = f"{montant:,}".replace(",", " ")

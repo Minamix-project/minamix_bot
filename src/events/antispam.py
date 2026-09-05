@@ -13,16 +13,16 @@ async def register(bot):
         if message.guild is None or message.guild.id not in GUILD_IDS:
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT 1 FROM antispam_channels WHERE guild_id = %s AND channel_id = %s",
             (message.guild.id, message.channel.id)
         )
-        is_antispam = cursor.fetchone() is not None
+        is_antispam = (await cursor.fetchone()) is not None
 
         if not is_antispam:
-            cursor.close()
+            await cursor.close()
             db.close()
             return
 
@@ -40,12 +40,12 @@ async def register(bot):
         except Exception:
             pass
 
-        cursor.execute(
+        await cursor.execute(
             "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
             (message.guild.id,)
         )
-        logs_result = cursor.fetchone()
-        cursor.close()
+        logs_result = (await cursor.fetchone())
+        await cursor.close()
         db.close()
 
         if not logs_result:

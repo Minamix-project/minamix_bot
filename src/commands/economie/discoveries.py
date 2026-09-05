@@ -8,14 +8,14 @@ from src.utils.reactions import EGGS
 async def register(bot):
     @bot.tree.command(name="discoveries", description="Voir tes découvertes secrètes.")
     async def discoveries(interaction: Interaction):
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT egg_key FROM discoveries WHERE user_id = %s",
             (interaction.user.id,)
         )
-        found_keys = {row[0] for row in cursor.fetchall()}
-        cursor.close()
+        found_keys = {row[0] for row in (await cursor.fetchall())}
+        await cursor.close()
         db.close()
 
         total = len(EGGS)

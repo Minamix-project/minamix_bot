@@ -17,15 +17,15 @@ async def register(bot):
 
         await interaction.response.defer()
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT moderator_id, reason, created_at FROM warnings "
             "WHERE user_id = %s AND guild_id = %s ORDER BY created_at DESC",
             (user.id, interaction.guild.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

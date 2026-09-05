@@ -14,15 +14,15 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "INSERT INTO guild_config (guild_id, config_key, value) VALUES (%s, 'warn_logs_channel', %s) "
             "ON DUPLICATE KEY UPDATE value = %s",
             (interaction.guild.id, str(channel.id), str(channel.id))
         )
-        db.commit()
-        cursor.close()
+        await db.commit()
+        await cursor.close()
         db.close()
 
         embed = discord.Embed(

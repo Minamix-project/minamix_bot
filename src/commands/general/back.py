@@ -8,14 +8,14 @@ from src.events.afk_handler import remove_afk
 async def register(bot):
     @bot.tree.command(name="back", description="Annuler ton statut absent.")
     async def back(interaction: Interaction):
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT original_nick FROM afk_users WHERE user_id = %s AND guild_id = %s",
             (interaction.user.id, interaction.guild.id)
         )
-        row = cursor.fetchone()
-        cursor.close()
+        row = (await cursor.fetchone())
+        await cursor.close()
         db.close()
 
         if not row:

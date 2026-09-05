@@ -18,14 +18,14 @@ async def register(bot):
     @bot.tree.command(name="config", description="Afficher les salons configurés (Admin seulement)")
     @admin_only()
     async def config(interaction: Interaction):
-        db = get_db_connection()
+        db = await get_db_connection()
         try:
-            with db.cursor() as cursor:
-                cursor.execute(
+            async with db.cursor() as cursor:
+                await cursor.execute(
                     "SELECT config_key, value FROM guild_config WHERE guild_id = %s ORDER BY config_key",
                     (interaction.guild_id,),
                 )
-                rows = cursor.fetchall()
+                rows = (await cursor.fetchall())
         finally:
             db.close()
 

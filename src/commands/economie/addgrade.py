@@ -50,14 +50,14 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
+        db = await get_db_connection()
+        cursor = await db.cursor()
         try:
-            cursor.execute(
+            await cursor.execute(
                 "INSERT INTO guild_boutique_roles (guild_id, role_id, prix, nom, description, exclusif) VALUES (%s, %s, %s, %s, %s, %s)",
                 (interaction.guild_id, role.id, prix, nom, description, exclusif)
             )
-            db.commit()
+            await db.commit()
 
             label = "exclusif" if exclusif else "standard"
             embed = discord.Embed(
@@ -80,5 +80,5 @@ async def register(bot):
             set_bot_footer(embed, interaction)
             await interaction.response.send_message(embed=embed, ephemeral=True)
         finally:
-            cursor.close()
+            await cursor.close()
             db.close()
