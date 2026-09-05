@@ -19,7 +19,8 @@ _ECONOMY = (
     "`/shop` — Afficher la boutique du serveur\n"
     "`/buy [numéro]` — Acheter un rôle\n"
     "`/leaderboard` — Afficher le classement avec navigation\n"
-    "`/discoveries` — Consulter tes découvertes secrètes"
+    "`/discoveries` — Consulter tes découvertes secrètes\n"
+    "`/transactions [user]` — Consulter l'historique économique"
 )
 
 _RP_PUBLIC = (
@@ -45,7 +46,8 @@ _ADMIN_ECONOMY = (
     "`/addnax <user> <montant>` — Ajouter des Nax\n"
     "`/removenax <user> <montant>` — Retirer des Nax\n"
     "`/economystats` — Afficher les statistiques économiques\n"
-    "`/resetbalances` — Remettre les soldes du serveur à zéro"
+    "`/resetbalances` — Remettre les soldes du serveur à zéro\n"
+    "`/economyconfig` — Configurer les gains, délais et plafonds"
 )
 
 _MODERATION = (
@@ -56,7 +58,10 @@ _MODERATION = (
     "`/activity <user>` — Consulter l'activité d'un membre\n"
     "`/addantispam <channel>` — Activer l'antispam dans un salon\n"
     "`/removeantispam <channel>` — Désactiver l'antispam\n"
-    "`/listantispam` — Lister les salons protégés"
+    "`/listantispam` — Lister les salons protégés\n"
+    "`/addecoignore <channel>` — Ignorer un salon pour les gains\n"
+    "`/removeecoignore <channel>` — Réactiver les gains dans un salon\n"
+    "`/listecoignore` — Lister les salons économiques ignorés"
 )
 
 _SYSTEM = (
@@ -67,7 +72,10 @@ _SYSTEM = (
     "`/setrpchannel <channel>` — Définir le salon des annonces RP\n"
     "`/servers` — Afficher les serveurs autorisés\n"
     "`/health` — Vérifier Discord et MySQL\n"
-    "`/backupstatus` — Vérifier le dernier dump SQL"
+    "`/backupstatus` — Vérifier le dernier dump et sa restauration\n"
+    "`/audit [...]` — Consulter les actions administratives\n"
+    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques\n"
+    "`/archivelegacytables` — Archiver les anciennes tables (avancé)"
 )
 
 

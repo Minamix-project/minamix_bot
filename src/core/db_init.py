@@ -2,6 +2,16 @@ from pathlib import Path
 
 from src.core.schema_migrations import run_schema_migrations
 
+_LEGACY_MODEL_FILES = {"boutique-model.sql", "solde-model.sql", "users-model.sql"}
+
+
+async def _table_exists(cursor, table: str) -> bool:
+    await cursor.execute(
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+        (table,),
+    )
+    return (await cursor.fetchone())[0] > 0
 
 # Column migrations: (table, column, ALTER statement)
 _COLUMN_MIGRATIONS = [
@@ -22,11 +32,12 @@ _COLUMN_MIGRATIONS = [
     ),
 ]
 
-
 async def _run_migrations(db):
     cursor = await db.cursor()
 
     for table, column, sql in _COLUMN_MIGRATIONS:
+        if not await _table_exists(cursor, table):
+            continue
         await cursor.execute(
             "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
             "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
@@ -61,21 +72,40 @@ async def _run_migrations(db):
 
 async def _migrate_economy_per_guild(db):
     from src.config import GUILD_IDS
+
     cursor = await db.cursor()
-    for guild_id in GUILD_IDS:
-        await cursor.execute(
-            "INSERT IGNORE INTO guild_wallets (guild_id, user_id, balance) "
-            "SELECT %s, user_id, balance FROM wallets",
-            (guild_id,),
-        )
-        await cursor.execute(
-            "INSERT INTO guild_boutique_roles (guild_id, role_id, prix, nom, description, exclusif) "
-            "SELECT %s, role_id, prix, nom, description, exclusif FROM boutique_roles "
-            "WHERE NOT EXISTS (SELECT 1 FROM guild_boutique_roles WHERE guild_id = %s)",
-            (guild_id, guild_id),
-        )
-    await db.commit()
-    await cursor.close()
+    try:
+        has_wallets = await _table_exists(cursor, "wallets")
+        has_shop = await _table_exists(cursor, "boutique_roles")
+        has_users = await _table_exists(cursor, "users")
+        for guild_id in GUILD_IDS:
+            if has_wallets:
+                await cursor.execute(
+                    "INSERT INTO guild_wallets (guild_id, user_id, balance) "
+                    "SELECT %s, w.user_id, w.balance FROM wallets w "
+                    "LEFT JOIN guild_wallets gw ON gw.guild_id = %s AND gw.user_id = w.user_id "
+                    "WHERE gw.user_id IS NULL",
+                    (guild_id, guild_id),
+                )
+            if has_shop:
+                await cursor.execute(
+                    "INSERT INTO guild_boutique_roles (guild_id, role_id, prix, nom, description, exclusif) "
+                    "SELECT %s, role_id, prix, nom, description, exclusif FROM boutique_roles "
+                    "WHERE NOT EXISTS (SELECT 1 FROM guild_boutique_roles WHERE guild_id = %s)",
+                    (guild_id, guild_id),
+                )
+            if has_users:
+                await cursor.execute(
+                    "INSERT INTO guild_member_activity (guild_id, user_id, last_seen) "
+                    "SELECT %s, u.user_id, u.last_seen FROM users u "
+                    "LEFT JOIN guild_member_activity ga ON ga.guild_id = %s AND ga.user_id = u.user_id "
+                    "WHERE ga.user_id IS NULL AND u.last_seen IS NOT NULL",
+                    (guild_id, guild_id),
+                )
+        await db.commit()
+    finally:
+        await cursor.close()
+
 
 async def init_db(db):
     model_dir = Path("src/model")
@@ -85,6 +115,8 @@ async def init_db(db):
 
     cursor = await db.cursor()
     for sql_file in sorted(model_dir.rglob("*.sql")):
+        if sql_file.name in _LEGACY_MODEL_FILES:
+            continue
         if sql_file.name.startswith("_"):
             continue
         try:

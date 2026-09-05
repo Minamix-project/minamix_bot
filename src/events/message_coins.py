@@ -9,7 +9,7 @@ from src.config import GUILD_IDS
 
 _last_gain: dict[tuple[int, int], float] = {}
 _last_content: dict[tuple[int, int], str] = {}
-_last_seen_update: dict[int, float] = {}
+_last_seen_update: dict[tuple[int, int], float] = {}
 COOLDOWN = 60
 SEEN_DEBOUNCE = 300
 MIN_LENGTH = 5
@@ -82,16 +82,17 @@ async def register(bot):
         now = time.time()
 
         # Update last_seen (debounced every 5 min)
-        if now - _last_seen_update.get(message.author.id, 0) >= SEEN_DEBOUNCE:
-            _last_seen_update[message.author.id] = now
+        activity_key = (message.guild.id, message.author.id)
+        if now - _last_seen_update.get(activity_key, 0) >= SEEN_DEBOUNCE:
+            _last_seen_update[activity_key] = now
             try:
                 from src.utils.db import get_db_connection
                 db = await get_db_connection()
                 cursor = await db.cursor()
                 await cursor.execute(
-                    "INSERT INTO users (user_id, last_seen) VALUES (%s, NOW()) "
+                    "INSERT INTO guild_member_activity (guild_id, user_id, last_seen) VALUES (%s, %s, NOW()) "
                     "ON DUPLICATE KEY UPDATE last_seen = NOW()",
-                    (message.author.id,)
+                    (message.guild.id, message.author.id)
                 )
                 await db.commit()
                 await cursor.close()

@@ -19,7 +19,10 @@ async def register(bot):
         db = await get_db_connection()
         cursor = await db.cursor()
 
-        await cursor.execute("SELECT last_seen FROM users WHERE user_id = %s", (user.id,))
+        await cursor.execute(
+            "SELECT last_seen FROM guild_member_activity WHERE guild_id = %s AND user_id = %s",
+            (interaction.guild_id, user.id),
+        )
         seen_row = (await cursor.fetchone())
 
         await cursor.execute(

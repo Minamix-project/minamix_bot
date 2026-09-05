@@ -10,7 +10,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -62,15 +62,28 @@ services:
           sleep "$$BACKUP_INTERVAL_SECONDS" & wait $$!
         done
 
+  backup-test-db:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:-backup-restore-test}
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backup-test:
     image: mysql:8
     restart: unless-stopped
     environment:
       DB_NAME: ${DB_NAME}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:-backup-restore-test}
       BACKUP_TEST_INTERVAL_SECONDS: ${BACKUP_TEST_INTERVAL_SECONDS:-86400}
     depends_on:
-      db:
+      backup-test-db:
         condition: service_healthy
     volumes:
       - ./backups:/backups:ro
@@ -92,15 +105,15 @@ services:
             return
           fi
           testdb="$${DB_NAME}_backup_test"
-          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`; CREATE DATABASE \`$$testdb\`;"
-          if MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot "$$testdb" < "$$latest" 2>/tmp/restore_error.log; then
-            tablecount=$$(MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$$testdb';")
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`; CREATE DATABASE \`$$testdb\`;"
+          if MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot "$$testdb" < "$$latest" 2>/tmp/restore_error.log; then
+            tablecount=$$(MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$$testdb';")
             write_status "$$(basename $$latest)" "ok" "Restauration reussie, $$tablecount tables"
           else
             write_status "$$(basename $$latest)" "fail" "Echec de restauration (voir logs du conteneur)"
             cat /tmp/restore_error.log || true
           fi
-          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`;"
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`;"
         }
         trap 'test_restore; exit 0' INT TERM
         while true; do
