@@ -105,6 +105,15 @@ services:
             return
           fi
           testdb="$${DB_NAME}_backup_test"
+          attempts=0
+          until MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h backup-test-db -uroot --silent; do
+            attempts=$$((attempts + 1))
+            if [ "$$attempts" -ge 30 ]; then
+              write_status "$$(basename $$latest)" "fail" "Base de test MySQL indisponible apres 60 secondes"
+              return
+            fi
+            sleep 2
+          done
           MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`; CREATE DATABASE \`$$testdb\`;"
           if MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot "$$testdb" < "$$latest" 2>/tmp/restore_error.log; then
             tablecount=$$(MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h backup-test-db -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$$testdb';")
