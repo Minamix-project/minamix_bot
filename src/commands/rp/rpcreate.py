@@ -1,3 +1,4 @@
+from src.utils.permissions import rp_only
 import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
@@ -13,6 +14,7 @@ async def register(bot):
         prefix="Préfixe pour faire parler le personnage (ex: Aria:)",
         image="Image du personnage (fichier)",
     )
+    @rp_only()
     async def rpcreate(
         interaction: Interaction,
         user: Member,

@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, Member, Embed, app_commands
 import discord
 from src.utils.db import get_db_connection
@@ -23,13 +24,8 @@ async def register(bot):
         depuis_jours="Ne montrer que les N derniers jours",
     )
     @app_commands.autocomplete(commande=_commande_autocomplete)
+    @admin_only()
     async def audit(interaction: Interaction, auteur: Member = None, commande: str = None, depuis_jours: int = None):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         conditions = ["guild_id = %s"]
         params = [interaction.guild_id]
         if auteur is not None:

@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, User
 from discord import app_commands
 import discord
@@ -14,16 +15,8 @@ async def register(bot):
         user="Utilisateur à qui ajouter de l'argent",
         montant="Montant à ajouter"
     )
+    @admin_only()
     async def addargent(interaction: Interaction, user: User, montant: int):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(
-                title="❌ Permission refusée",
-                description="Vous n'avez pas la permission d'utiliser cette commande.",
-                color=discord.Color.red()
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if montant <= 0:
             embed = discord.Embed(
                 title="💢 Montant invalide",

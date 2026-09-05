@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, Role
 from discord import app_commands
 import discord
@@ -22,6 +23,7 @@ async def register(bot):
         app_commands.Choice(name="Non (défaut)", value=0),
         app_commands.Choice(name="Oui", value=1),
     ])
+    @admin_only()
     async def addgrade(
         interaction: Interaction,
         role: Role,
@@ -30,16 +32,6 @@ async def register(bot):
         exclusif: int = 0,
         description: str = None,
     ):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(
-                title="❌ Permission refusée",
-                description="Vous n'avez pas la permission d'utiliser cette commande.",
-                color=discord.Color.red()
-            )
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         if prix <= 0:
             embed = discord.Embed(
                 title="💢 Prix invalide",

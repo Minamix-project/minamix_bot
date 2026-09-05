@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction
 from src.utils.db import get_db_connection
@@ -7,13 +8,8 @@ from src.utils.format import format_amount
 
 async def register(bot):
     @bot.tree.command(name="economystats", description="Statistiques économiques du serveur (Admin seulement)")
+    @admin_only()
     async def economy_stats(interaction: Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         db = await get_db_connection()

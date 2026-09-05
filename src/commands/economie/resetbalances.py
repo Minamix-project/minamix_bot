@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction
 from discord.ui import Button
@@ -105,17 +106,8 @@ class _ConfirmModal(discord.ui.Modal, title="Confirmation requise"):
 
 async def register(bot):
     @bot.tree.command(name="resetbalances", description="Remettre à zéro tous les soldes (Admin seulement)")
+    @admin_only()
     async def resetbalances(interaction: Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(
-                title="❌ Permission refusée",
-                description="Vous n'avez pas la permission d'utiliser cette commande.",
-                color=discord.Color.red(),
-            )
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         embed = discord.Embed(
             title="⚠️ Réinitialisation des soldes",
             description=(

@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, app_commands
 import discord
 from src.utils.shop import get_shop_items, item_autocomplete
@@ -14,17 +15,8 @@ async def register(bot):
     )
     @app_commands.describe(numero="Article à supprimer")
     @app_commands.autocomplete(numero=item_autocomplete)
+    @admin_only()
     async def supprimergrade(interaction: Interaction, numero: str):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(
-                title="❌ Permission refusée",
-                description="Vous n'avez pas la permission d'utiliser cette commande.",
-                color=discord.Color.red()
-            )
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         items = await get_shop_items(interaction.guild_id)
 
         try:

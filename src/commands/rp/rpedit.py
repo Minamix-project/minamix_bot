@@ -1,3 +1,4 @@
+from src.utils.permissions import rp_only
 import discord
 from discord import Interaction, Member, app_commands
 from discord.ui import Select, Modal, TextInput
@@ -10,6 +11,7 @@ from src.utils.views import ExpiringView
 async def register(bot):
     @bot.tree.command(name="rpedit", description="Modifier un personnage RP (nom / préfixe)")
     @app_commands.describe(user="Utilisateur propriétaire du personnage")
+    @rp_only()
     async def rpedit(interaction: Interaction, user: Member):
         if not has_rp_permission(interaction.user):
             embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())

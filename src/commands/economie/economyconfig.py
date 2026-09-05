@@ -1,8 +1,9 @@
+from src.utils.permissions import admin_only
 from discord import Interaction, app_commands
 import discord
 from src.utils.embed import set_bot_footer
 from src.utils.format import format_amount
-from src.utils.economy_config import DEFAULTS, get_guild_economy_config, update_guild_economy_config
+from src.utils.economy_config import get_guild_economy_config, update_guild_economy_config
 
 
 def _config_lines(config: dict) -> list[str]:
@@ -34,6 +35,7 @@ async def register(bot):
         starting_balance="Solde initial d'un nouveau membre",
         balance_cap="Plafond de solde (0 = aucun plafond)",
     )
+    @admin_only()
     async def economyconfig(
         interaction: Interaction,
         work_gain_min: int = None,
@@ -46,8 +48,30 @@ async def register(bot):
         starting_balance: int = None,
         balance_cap: int = None,
     ):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
+        invalid = None
+        non_negative_values = {
+            "work_gain_min": work_gain_min,
+            "work_gain_max": work_gain_max,
+            "message_gain_min": message_gain_min,
+            "message_gain_max": message_gain_max,
+            "message_gain_long_min": message_gain_long_min,
+            "message_gain_long_max": message_gain_long_max,
+            "starting_balance": starting_balance,
+            "balance_cap": balance_cap,
+        }
+        for field, value in non_negative_values.items():
+            if value is not None and value < 0:
+                invalid = f"`{field}` ne peut pas être négatif."
+                break
+        if work_cooldown_minutes is not None and work_cooldown_minutes <= 0:
+            invalid = "`work_cooldown_minutes` doit être supérieur à zéro."
+
+        if invalid is not None:
+            embed = discord.Embed(
+                title="❌ Configuration invalide",
+                description=invalid,
+                color=discord.Color.red(),
+            )
             set_bot_footer(embed, interaction)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
@@ -73,12 +97,12 @@ async def register(bot):
             changes["balance_cap"] = balance_cap if balance_cap > 0 else None
 
         if changes:
+            current = await get_guild_economy_config(interaction.guild_id)
             for min_key, max_key in (
                 ("work_gain_min", "work_gain_max"),
                 ("message_gain_min", "message_gain_max"),
                 ("message_gain_long_min", "message_gain_long_max"),
             ):
-                current = await get_guild_economy_config(interaction.guild_id)
                 lo = changes.get(min_key, current[min_key])
                 hi = changes.get(max_key, current[max_key])
                 if lo > hi:
@@ -90,6 +114,18 @@ async def register(bot):
                     set_bot_footer(embed, interaction)
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
+
+            effective_start = changes.get("starting_balance", current["starting_balance"])
+            effective_cap = changes.get("balance_cap", current["balance_cap"])
+            if effective_cap is not None and effective_start > effective_cap:
+                embed = discord.Embed(
+                    title="❌ Configuration invalide",
+                    description="Le solde initial ne peut pas dépasser le plafond.",
+                    color=discord.Color.red(),
+                )
+                set_bot_footer(embed, interaction)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
 
             config = await update_guild_economy_config(interaction.guild_id, **changes)
             title = "✅ Configuration économique mise à jour"

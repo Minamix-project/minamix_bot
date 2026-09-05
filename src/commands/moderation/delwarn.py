@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
@@ -8,13 +9,8 @@ from src.utils.confirm import confirm_action
 async def register(bot):
     @bot.tree.command(name="delwarn", description="Supprimer un avertissement par son numéro (Admin seulement)")
     @app_commands.describe(user="Membre concerné", numero="Numéro du warn (visible dans /warnings)")
+    @admin_only()
     async def delwarn(interaction: Interaction, user: Member, numero: int):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         db = await get_db_connection()
         cursor = await db.cursor()
         await cursor.execute(

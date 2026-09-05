@@ -1,3 +1,4 @@
+from src.utils.permissions import admin_only
 import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
@@ -8,13 +9,8 @@ from src.utils.pagination import PaginationView
 async def register(bot):
     @bot.tree.command(name="warnings", description="Voir les avertissements d'un membre (Admin seulement)")
     @app_commands.describe(user="Membre à consulter", page="Page à afficher")
+    @admin_only()
     async def warnings(interaction: Interaction, user: Member, page: int = 1):
-        if not interaction.user.guild_permissions.administrator:
-            embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
-            set_bot_footer(embed, interaction)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
         await interaction.response.defer()
 
         db = await get_db_connection()
