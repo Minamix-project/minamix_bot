@@ -17,7 +17,7 @@ async def register(bot):
         db = await get_db_connection()
         cursor = await db.cursor()
         await cursor.execute(
-            "SELECT id, name, prefix, nax_balance, created_at FROM rp_characters "
+            "SELECT id, name, prefix, nax_balance, created_at, sheet_channel_id, sheet_message_id FROM rp_characters "
             "WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, user.id)
         )
@@ -48,7 +48,7 @@ async def register(bot):
                 await inter.response.send_message("❌ Personnage introuvable.", ephemeral=True)
                 return
 
-            _, char_name, char_prefix, nax_balance, created_at = char
+            _, char_name, char_prefix, nax_balance, created_at, sheet_channel_id, sheet_message_id = char
 
             async def on_confirm(confirm_inter: Interaction):
                 db2 = await get_db_connection()
@@ -57,6 +57,14 @@ async def register(bot):
                 await db2.commit()
                 await cursor2.close()
                 db2.close()
+                if sheet_channel_id and sheet_message_id:
+                    channel = confirm_inter.client.get_channel(sheet_channel_id)
+                    if channel:
+                        try:
+                            sheet = await channel.fetch_message(sheet_message_id)
+                            await sheet.delete()
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            pass
                 invalidate_cache(confirm_inter.guild.id)
 
                 result_embed = discord.Embed(

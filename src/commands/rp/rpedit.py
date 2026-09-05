@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select, Modal, TextInput
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache
+from src.utils.rp import invalidate_cache, prefixes_too_close
 from src.utils.views import ExpiringView
 
 
@@ -69,6 +69,22 @@ async def register(bot):
                             "❌ Le nom doit faire 1–100 caractères et le préfixe 1–20 caractères.", ephemeral=True
                         )
                         return
+
+                    if prefix_val != current_prefix:
+                        db_check = await get_db_connection()
+                        try:
+                            async with db_check.cursor() as check_cursor:
+                                await check_cursor.execute(
+                                    "SELECT prefix FROM rp_characters WHERE guild_id = %s AND id <> %s",
+                                    (modal_inter.guild.id, char_id),
+                                )
+                                if any(prefixes_too_close(prefix_val, row[0]) for row in await check_cursor.fetchall()):
+                                    await modal_inter.response.send_message(
+                                        "❌ Ce préfixe est trop proche d’un préfixe existant.", ephemeral=True
+                                    )
+                                    return
+                        finally:
+                            db_check.close()
 
                     updates = []
                     values = []

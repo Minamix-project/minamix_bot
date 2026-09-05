@@ -73,8 +73,8 @@ async def register(bot):
             db2 = await get_db_connection()
             cursor2 = await db2.cursor()
             await cursor2.execute(
-                "UPDATE rp_characters SET image_url = %s WHERE id = %s",
-                (stable_url, char_id)
+                "UPDATE rp_characters SET image_url = %s, sheet_channel_id = %s, sheet_message_id = %s WHERE id = %s",
+                (stable_url, rp_channel.id, msg.id, char_id)
             )
             await db2.commit()
             await cursor2.close()

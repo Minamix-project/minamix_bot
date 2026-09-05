@@ -10,6 +10,15 @@ def normalize_discord_image_url(url: str) -> str:
         return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
     return url
 
+
+def prefixes_too_close(candidate: str, existing: str) -> bool:
+    """Reject visually ambiguous prefixes without imposing a fixed naming style."""
+    left = candidate.strip().casefold().rstrip(" :!?-_·")
+    right = existing.strip().casefold().rstrip(" :!?-_·")
+    if not left or not right:
+        return False
+    return left == right or (left.startswith(right) or right.startswith(left)) and abs(len(left) - len(right)) <= 1
+
 # guild_id -> {prefix: (char_id, user_id, name, image_url)}
 _prefix_cache: dict[int, dict[str, tuple]] = {}
 
