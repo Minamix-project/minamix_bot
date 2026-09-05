@@ -53,6 +53,9 @@ async def register(bot):
             return embed
 
         view = PaginationView(interaction.user.id, total_pages, render, page)
-        view.message = await interaction.followup.send(
-            embed=view.current_embed(), view=view if total_pages > 1 else None, wait=True
-        )
+        if total_pages > 1:
+            view.message = await interaction.followup.send(
+                embed=view.current_embed(), view=view, wait=True
+            )
+        else:
+            await interaction.followup.send(embed=view.current_embed())
