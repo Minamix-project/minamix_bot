@@ -1,6 +1,6 @@
 from discord import Interaction, Member, app_commands
 import discord
-from src.utils.shop import get_shop_items
+from src.utils.shop import get_shop_items, item_autocomplete
 from src.utils.embed import set_bot_footer
 from src.utils.balance import get_user_balance
 from src.utils.wallet import modify_user_balance
@@ -14,7 +14,7 @@ async def register(bot):
         description="Donner un article de la boutique à un utilisateur (Admin seulement)"
     )
     @app_commands.describe(
-        numero="Numéro de l'article affiché dans /shop",
+        numero="Article à donner",
         user="Utilisateur qui reçoit le rôle",
         deduire="Déduire le prix du solde du receveur (Non par défaut)"
     )
@@ -22,16 +22,22 @@ async def register(bot):
         app_commands.Choice(name="Non (gratuit)", value=0),
         app_commands.Choice(name="Oui (déduit du solde)", value=1),
     ])
-    async def giveitem(interaction: Interaction, numero: int, user: Member, deduire: int = 0):
+    @app_commands.autocomplete(numero=item_autocomplete)
+    async def giveitem(interaction: Interaction, numero: str, user: Member, deduire: int = 0):
         if not interaction.user.guild_permissions.administrator:
             embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
             set_bot_footer(embed, interaction)
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        items = get_shop_items()
+        items = await get_shop_items(interaction.guild_id)
 
-        if numero < 1 or numero > len(items):
+        try:
+            numero_int = int(numero)
+        except ValueError:
+            numero_int = -1
+
+        if numero_int < 1 or numero_int > len(items):
             embed = discord.Embed(
                 title="❌ Numéro invalide",
                 description=f"Il n'y a que **{len(items)}** article(s) dans la boutique.",
@@ -41,6 +47,7 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
+        numero = numero_int
         _, role_id, prix, nom, *__ = items[numero - 1]
 
         role = interaction.guild.get_role(int(role_id))
@@ -65,8 +72,8 @@ async def register(bot):
             return
 
         if deduire:
-            db = get_db_connection()
-            balance = await get_user_balance(db, user.id)
+            db = await get_db_connection()
+            balance = await get_user_balance(db, interaction.guild_id, user.id)
             if balance < prix:
                 embed = discord.Embed(
                     title="❌ Solde insuffisant",
@@ -80,7 +87,10 @@ async def register(bot):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 db.close()
                 return
-            await modify_user_balance(db, user.id, prix, "remove")
+            await modify_user_balance(
+                db, interaction.guild_id, user.id, prix, "remove",
+                type_="admin_giveitem", detail=f"{nom} offert par {interaction.user}",
+            )
             db.close()
 
         try:

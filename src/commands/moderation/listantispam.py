@@ -13,14 +13,14 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT channel_id FROM antispam_channels WHERE guild_id = %s",
             (interaction.guild.id,)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

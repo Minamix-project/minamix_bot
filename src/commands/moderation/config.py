@@ -11,6 +11,7 @@ _CONFIG_LABELS = {
     "warn_logs_channel": "Logs des avertissements",
     "afk_logs_channel": "Logs des absences",
     "rp_channel": "Salon RP",
+    "error_logs_channel": "Logs des erreurs techniques",
 }
 
 
@@ -18,14 +19,19 @@ async def register(bot):
     @bot.tree.command(name="config", description="Afficher les salons configurés (Admin seulement)")
     @admin_only()
     async def config(interaction: Interaction):
-        db = get_db_connection()
+        db = await get_db_connection()
         try:
-            with db.cursor() as cursor:
-                cursor.execute(
+            async with db.cursor() as cursor:
+                await cursor.execute(
                     "SELECT config_key, value FROM guild_config WHERE guild_id = %s ORDER BY config_key",
                     (interaction.guild_id,),
                 )
-                rows = cursor.fetchall()
+                rows = (await cursor.fetchall())
+
+                await cursor.execute(
+                    "SELECT COUNT(*), MAX(version), MAX(applied_at) FROM schema_migrations"
+                )
+                migration_count, last_version, last_applied_at = await cursor.fetchone()
         finally:
             db.close()
 
@@ -42,6 +48,13 @@ async def register(bot):
 
                 value = f"{channel.mention} — **#{channel.name}**" if channel else f"⚠️ Salon introuvable (`{channel_id}`)"
                 embed.add_field(name=label, value=value, inline=False)
+
+        if migration_count:
+            embed.add_field(
+                name="Schéma DB",
+                value=f"{migration_count} migration(s) appliquée(s) — dernière : `{last_version}` (<t:{int(last_applied_at.timestamp())}:d>)",
+                inline=False,
+            )
 
         set_bot_footer(embed, interaction)
         await interaction.response.send_message(embed=embed, ephemeral=True)

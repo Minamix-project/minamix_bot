@@ -3,6 +3,7 @@ from src.utils.db import get_db_connection
 from src.utils.wallet import modify_user_balance
 from src.utils.format import format_amount
 from src.utils.embed import set_bot_footer
+from src.utils.economy_config import get_guild_economy_config
 import random
 import time
 import discord
@@ -66,21 +67,24 @@ async def register(bot):
         description="Travailler pour gagner de l'argent (utilisable 1x par semaine)."
     )
     async def work(interaction: Interaction):
-        db = get_db_connection()
-        cursor = db.cursor()
+        config = await get_guild_economy_config(interaction.guild_id)
+        cooldown = config["work_cooldown_seconds"]
+
+        db = await get_db_connection()
+        cursor = await db.cursor()
         user_id = interaction.user.id
         current_time = int(time.time())
 
-        cursor.execute("SELECT last_work FROM users WHERE user_id = %s", (user_id,))
-        result = cursor.fetchone()
+        await cursor.execute("SELECT last_work FROM guild_work_cooldowns WHERE guild_id = %s AND user_id = %s", (interaction.guild_id, user_id))
+        result = (await cursor.fetchone())
 
         if result:
             last_work = result[0]
             if last_work is not None:
-               
-                if current_time - last_work < 604800:
-               
-                    remaining = 604800 - (current_time - last_work)
+
+                if current_time - last_work < cooldown:
+
+                    remaining = cooldown - (current_time - last_work)
                     days = remaining // 86400
                     hours = (remaining % 86400) // 3600
                     minutes = (remaining % 3600) // 60
@@ -96,15 +100,15 @@ async def register(bot):
                     return
         else:
          
-            cursor.execute("INSERT INTO users (user_id, last_work) VALUES (%s, %s)", (user_id, 0))
-            db.commit()
+            await cursor.execute("INSERT INTO guild_work_cooldowns (guild_id, user_id, last_work) VALUES (%s, %s, %s)", (interaction.guild_id, user_id, 0))
+            await db.commit()
 
-        gain = random.randint(50, 250)
+        gain = random.randint(config["work_gain_min"], config["work_gain_max"])
 
-        new_balance = await modify_user_balance(db, user_id, gain, "add")
+        new_balance = await modify_user_balance(db, interaction.guild_id, user_id, gain, "add", type_="work")
 
-        cursor.execute("UPDATE users SET last_work = %s WHERE user_id = %s", (current_time, user_id))
-        db.commit()
+        await cursor.execute("UPDATE guild_work_cooldowns SET last_work = %s WHERE guild_id = %s AND user_id = %s", (current_time, interaction.guild_id, user_id))
+        await db.commit()
 
         joke = random.choice(JOKES)
 

@@ -1,31 +1,36 @@
-import pymysql
+from src.utils.economy_config import get_guild_economy_config
+from src.utils.transactions import record_transaction
 
 
-async def modify_user_balance(
-    db: pymysql.connections.Connection,
-    user_id: int,
-    amount: int,
-    operation: str = "add",
-) -> int:
-    with db.cursor() as cursor:
-        cursor.execute("SELECT balance FROM wallets WHERE user_id = %s", (user_id,))
-        result = cursor.fetchone()
-        if not result:
-            cursor.execute("INSERT INTO wallets (user_id, balance) VALUES (%s, 0)", (user_id,))
-            db.commit()
-            current_balance = 0
-        else:
-            current_balance = result[0]
+def calculate_balance(current: int, amount: int, operation: str, cap: int | None = None) -> int:
+    if operation == "add":
+        value = current + amount
+        return min(value, cap) if cap is not None else value
+    if operation == "remove": return max(current - amount, 0)
+    if operation == "set": return amount
+    raise ValueError(f"Opération inconnue : {operation}")
 
-        if operation == "add":
-            new_balance = current_balance + amount
-        elif operation == "remove":
-            new_balance = max(current_balance - amount, 0)
-        elif operation == "set":
-            new_balance = amount
-        else:
-            raise ValueError(f"Opération inconnue : {operation}")
 
-        cursor.execute("UPDATE wallets SET balance = %s WHERE user_id = %s", (new_balance, user_id))
-        db.commit()
-        return new_balance
+async def modify_user_balance(db, guild_id: int, user_id: int, amount: int, operation: str = "add",
+                               *, type_: str | None = None, detail: str | None = None) -> int:
+    config = await get_guild_economy_config(guild_id)
+    await db.begin()
+    try:
+        async with db.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO guild_wallets (guild_id, user_id, balance) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
+                (guild_id, user_id, config["starting_balance"]),
+            )
+            await cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s AND user_id = %s FOR UPDATE", (guild_id, user_id))
+            current = (await cursor.fetchone())[0]
+            value = calculate_balance(current, amount, operation, config["balance_cap"])
+            await cursor.execute("UPDATE guild_wallets SET balance = %s WHERE guild_id = %s AND user_id = %s", (value, guild_id, user_id))
+            if type_ is not None:
+                signed_amount = value - current
+                await record_transaction(db, guild_id, user_id, type_, signed_amount, value, detail)
+        await db.commit()
+        return value
+    except Exception:
+        await db.rollback()
+        raise

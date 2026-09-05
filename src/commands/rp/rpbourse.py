@@ -27,15 +27,15 @@ async def register(bot):
     async def rpbourse(interaction: Interaction, user: Member = None):
         target = user or interaction.user
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT id, name, nax_balance FROM rp_characters "
             "WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, target.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:

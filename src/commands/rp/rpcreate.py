@@ -61,18 +61,18 @@ async def register(bot):
         msg = await rp_channel.send(embed=sheet_embed, file=file)
         stable_url = msg.attachments[0].url if msg.attachments else image.url
 
-        db = get_db_connection()
-        cursor = db.cursor()
+        db = await get_db_connection()
+        cursor = await db.cursor()
         try:
-            cursor.execute(
+            await cursor.execute(
                 "INSERT INTO rp_characters (guild_id, user_id, name, prefix, image_url) "
                 "VALUES (%s, %s, %s, %s, %s)",
                 (interaction.guild.id, user.id, name, prefix, stable_url)
             )
-            db.commit()
+            await db.commit()
             char_id = cursor.lastrowid
         except Exception as e:
-            cursor.close()
+            await cursor.close()
             db.close()
             if "Duplicate" in str(e):
                 embed = discord.Embed(
@@ -86,7 +86,7 @@ async def register(bot):
             await interaction.edit_original_response(embed=embed)
             return
 
-        cursor.close()
+        await cursor.close()
         db.close()
         invalidate_cache(interaction.guild.id)
 
@@ -104,14 +104,14 @@ async def register(bot):
 
 
 async def _get_rp_channel(bot, guild_id: int):
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'rp_channel'",
         (guild_id,)
     )
-    row = cursor.fetchone()
-    cursor.close()
+    row = (await cursor.fetchone())
+    await cursor.close()
     db.close()
     if row:
         return bot.get_channel(int(row[0]))

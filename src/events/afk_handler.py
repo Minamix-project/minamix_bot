@@ -15,14 +15,14 @@ AFK_WARN_THRESHOLD = 3
 
 
 async def send_afk_log(bot, guild_id: int, embed: discord.Embed) -> None:
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'afk_logs_channel'",
         (guild_id,)
     )
-    row = cursor.fetchone()
-    cursor.close()
+    row = (await cursor.fetchone())
+    await cursor.close()
     db.close()
     if not row:
         return
@@ -32,20 +32,20 @@ async def send_afk_log(bot, guild_id: int, embed: discord.Embed) -> None:
 
 
 async def remove_afk(member: discord.Member, guild: discord.Guild) -> None:
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute(
+    db = await get_db_connection()
+    cursor = await db.cursor()
+    await cursor.execute(
         "SELECT original_nick FROM afk_users WHERE user_id = %s AND guild_id = %s",
         (member.id, guild.id)
     )
-    row = cursor.fetchone()
+    row = (await cursor.fetchone())
     if row:
         original_nick = row[0]
-        cursor.execute(
+        await cursor.execute(
             "DELETE FROM afk_users WHERE user_id = %s AND guild_id = %s",
             (member.id, guild.id)
         )
-        db.commit()
+        await db.commit()
         try:
             await member.edit(nick=original_nick if original_nick != member.name else None)
         except discord.Forbidden:
@@ -60,7 +60,7 @@ async def remove_afk(member: discord.Member, guild: discord.Guild) -> None:
             log_embed.set_thumbnail(url=member.display_avatar.url)
             await send_afk_log(_bot, guild.id, log_embed)
 
-    cursor.close()
+    await cursor.close()
     db.close()
     _reminded.pop(member.id, None)
 
@@ -81,15 +81,15 @@ async def register(bot):
         if message.guild is None or message.guild.id not in GUILD_IDS:
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
+        db = await get_db_connection()
+        cursor = await db.cursor()
 
         # Check if author is AFK
-        cursor.execute(
+        await cursor.execute(
             "SELECT reason FROM afk_users WHERE user_id = %s AND guild_id = %s",
             (message.author.id, message.guild.id)
         )
-        author_afk = cursor.fetchone()
+        author_afk = (await cursor.fetchone())
 
         if author_afk:
             now = time.time()
@@ -124,13 +124,13 @@ async def register(bot):
                 )
                 view.message = sent
 
-            cursor.close()
+            await cursor.close()
             db.close()
             return
 
         # Check if any mentioned user is AFK
         if not message.mentions:
-            cursor.close()
+            await cursor.close()
             db.close()
             return
 
@@ -138,15 +138,15 @@ async def register(bot):
         for mentioned in message.mentions:
             if mentioned.bot:
                 continue
-            cursor.execute(
+            await cursor.execute(
                 "SELECT reason FROM afk_users WHERE user_id = %s AND guild_id = %s",
                 (mentioned.id, message.guild.id)
             )
-            row = cursor.fetchone()
+            row = (await cursor.fetchone())
             if row:
                 afk_users.append((mentioned, row[0]))
 
-        cursor.close()
+        await cursor.close()
         db.close()
 
         if afk_users:

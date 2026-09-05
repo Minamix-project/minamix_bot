@@ -3,7 +3,7 @@ services:
     image: mysql:8
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
@@ -19,6 +19,13 @@ services:
     build: .
     restart: unless-stopped
     env_file: .env
+    environment:
+      BOT_VERSION: ${BOT_VERSION:-dev}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      DEPLOY_NOTIFICATION: ${DEPLOY_NOTIFICATION:-0}
+    volumes:
+      - ./backups:/app/backups:ro
+      - ./backup_test_status:/app/backup_test_status:ro
     depends_on:
       db:
         condition: service_healthy
@@ -53,6 +60,52 @@ services:
         while true; do
           backup
           sleep "$$BACKUP_INTERVAL_SECONDS" & wait $$!
+        done
+
+  backup-test:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      DB_NAME: ${DB_NAME}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      BACKUP_TEST_INTERVAL_SECONDS: ${BACKUP_TEST_INTERVAL_SECONDS:-86400}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backups:/backups:ro
+      - ./backup_test_status:/status
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        write_status() {
+          ts=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{"file":"%s","status":"%s","detail":"%s","tested_at":"%s"}' "$$1" "$$2" "$$3" "$$ts" > /status/last_restore_test.json.tmp
+          mv /status/last_restore_test.json.tmp /status/last_restore_test.json
+        }
+        test_restore() {
+          latest=$$(ls -t /backups/*.sql 2>/dev/null | head -1 || true)
+          if [ -z "$$latest" ]; then
+            write_status "" "no_backup" "Aucun dump trouve dans /backups"
+            return
+          fi
+          testdb="$${DB_NAME}_backup_test"
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`; CREATE DATABASE \`$$testdb\`;"
+          if MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot "$$testdb" < "$$latest" 2>/tmp/restore_error.log; then
+            tablecount=$$(MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$$testdb';")
+            write_status "$$(basename $$latest)" "ok" "Restauration reussie, $$tablecount tables"
+          else
+            write_status "$$(basename $$latest)" "fail" "Echec de restauration (voir logs du conteneur)"
+            cat /tmp/restore_error.log || true
+          fi
+          MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h db -uroot -e "DROP DATABASE IF EXISTS \`$$testdb\`;"
+        }
+        trap 'test_restore; exit 0' INT TERM
+        while true; do
+          test_restore
+          sleep "$$BACKUP_TEST_INTERVAL_SECONDS" & wait $$!
         done
 
 volumes:

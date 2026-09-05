@@ -4,27 +4,27 @@ from src.utils.db import get_db_connection
 
 async def issue_warn(bot, guild: discord.Guild, user: discord.Member, moderator, reason: str) -> int:
     """Insert warn, DM user, send to logs. Returns total warn count for this user."""
-    db = get_db_connection()
-    cursor = db.cursor()
+    db = await get_db_connection()
+    cursor = await db.cursor()
 
-    cursor.execute(
+    await cursor.execute(
         "INSERT INTO warnings (user_id, guild_id, moderator_id, reason) VALUES (%s, %s, %s, %s)",
         (user.id, guild.id, moderator.id if hasattr(moderator, "id") else bot.user.id, reason)
     )
-    db.commit()
+    await db.commit()
 
-    cursor.execute(
+    await cursor.execute(
         "SELECT COUNT(*) FROM warnings WHERE user_id = %s AND guild_id = %s",
         (user.id, guild.id)
     )
-    total = cursor.fetchone()[0]
+    total = (await cursor.fetchone())[0]
 
-    cursor.execute(
+    await cursor.execute(
         "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'warn_logs_channel'",
         (guild.id,)
     )
-    logs_row = cursor.fetchone()
-    cursor.close()
+    logs_row = (await cursor.fetchone())
+    await cursor.close()
     db.close()
 
     # DM the warned user

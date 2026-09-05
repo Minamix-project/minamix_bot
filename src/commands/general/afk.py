@@ -80,9 +80,9 @@ class _AfkDatesModal(discord.ui.Modal, title="Définir la période d'absence"):
         except discord.Forbidden:
             pass
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "INSERT INTO afk_users (user_id, guild_id, original_nick, reason, start_time, end_time) "
             "VALUES (%s, %s, %s, %s, %s, %s) "
             "ON DUPLICATE KEY UPDATE reason=%s, original_nick=%s, start_time=%s, end_time=%s",
@@ -92,8 +92,8 @@ class _AfkDatesModal(discord.ui.Modal, title="Définir la période d'absence"):
                 self.reason, original_nick, start or datetime.now(), end,
             )
         )
-        db.commit()
-        cursor.close()
+        await db.commit()
+        await cursor.close()
         db.close()
 
         start_str = f"<t:{int(start.timestamp())}:f>" if start else "maintenant"

@@ -36,7 +36,7 @@ async def register(bot):
         if not content:
             return
 
-        cache = get_prefix_cache(message.guild.id)
+        cache = await get_prefix_cache(message.guild.id)
         matched_char = None
         matched_prefix = None
 

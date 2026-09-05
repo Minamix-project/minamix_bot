@@ -17,14 +17,14 @@ async def register(bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute(
+        db = await get_db_connection()
+        cursor = await db.cursor()
+        await cursor.execute(
             "SELECT id, name, prefix FROM rp_characters WHERE guild_id = %s AND user_id = %s ORDER BY created_at ASC",
             (interaction.guild.id, user.id)
         )
-        rows = cursor.fetchall()
-        cursor.close()
+        rows = (await cursor.fetchall())
+        await cursor.close()
         db.close()
 
         if not rows:
@@ -88,22 +88,22 @@ async def register(bot):
                         return
 
                     values.append(char_id)
-                    db2 = get_db_connection()
-                    cursor2 = db2.cursor()
+                    db2 = await get_db_connection()
+                    cursor2 = await db2.cursor()
                     try:
-                        cursor2.execute(
+                        await cursor2.execute(
                             f"UPDATE rp_characters SET {', '.join(updates)} WHERE id = %s",
                             values
                         )
-                        db2.commit()
+                        await db2.commit()
                     except Exception as e:
-                        cursor2.close()
+                        await cursor2.close()
                         db2.close()
                         msg = f"Le préfixe `{prefix_val}` est déjà pris." if "Duplicate" in str(e) else str(e)
                         await modal_inter.response.send_message(f"❌ {msg}", ephemeral=True)
                         return
 
-                    cursor2.close()
+                    await cursor2.close()
                     db2.close()
                     invalidate_cache(modal_inter.guild.id)
 
