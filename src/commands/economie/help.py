@@ -8,7 +8,8 @@ from src.utils.views import ExpiringView
 _GENERAL = (
     "`/afk` — Définir ton statut absent (raison + période)\n"
     "`/back` — Annuler ton statut absent\n"
-    "`/status` — Voir le statut et les infos du bot"
+    "`/status` — Voir le statut et les infos du bot\n"
+    "`/changelog` — Voir les dernières releases GitHub"
 )
 
 _ECONOMY = (
@@ -58,7 +59,8 @@ _MODERATION = (
     "`/listantispam` — Lister les channels anti-spam actifs\n"
     "`/config` — Voir les salons configurés\n"
     "`/servers` — Voir les serveurs autorisés\n"
-    "`/health` — Vérifier Discord et MySQL"
+    "`/health` — Vérifier Discord et MySQL\n"
+    "`/backupstatus` — Voir le dernier dump SQL"
 )
 
 async def register(bot):

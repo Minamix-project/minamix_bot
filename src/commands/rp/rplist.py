@@ -6,8 +6,8 @@ from src.utils.embed import set_bot_footer
 
 async def register(bot):
     @bot.tree.command(name="rplist", description="Lister les personnages RP d'un utilisateur")
-    @app_commands.describe(user="Utilisateur (laisse vide pour toi-même)")
-    async def rplist(interaction: Interaction, user: Member = None):
+    @app_commands.describe(user="Utilisateur (laisse vide pour toi-même)", page="Page à afficher")
+    async def rplist(interaction: Interaction, user: Member = None, page: int = 1):
         target = user or interaction.user
 
         db = get_db_connection()
@@ -37,7 +37,9 @@ async def register(bot):
         )
         embed.set_thumbnail(url=target.display_avatar.url)
 
-        for name, prefix, image_url, created_at in rows:
+        page = max(page, 1)
+        start = (page - 1) * 10
+        for name, prefix, image_url, created_at in rows[start:start + 10]:
             embed.add_field(
                 name=name,
                 value=f"Préfixe : `{prefix}`\n[Image]({image_url})\nCréé le <t:{int(created_at.timestamp())}:d>",

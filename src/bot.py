@@ -10,7 +10,8 @@ from src.config import GUILD_IDS
 from src.core.db_init import init_db
 from src.core.loader import load_modules
 from src.utils.db import get_db_connection
-from src.utils.permissions import configure_command_permissions
+from src.utils.permissions import ADMIN_COMMANDS, configure_command_permissions
+from src.utils.audit import record_admin_action
 
 
 def run_bot():
@@ -87,6 +88,14 @@ async def _main():
             await channel.send(embed=embed)
 
     bot.tree.interaction_check = guild_only
+
+    @bot.event
+    async def on_app_command_completion(interaction, command):
+        if command.name in ADMIN_COMMANDS and interaction.guild_id:
+            try:
+                record_admin_action(interaction.guild_id, interaction.user.id, command.name)
+            except Exception as exc:
+                print(f"[AUDIT] {exc}")
 
     @bot.event
     async def on_message(message: discord.Message):

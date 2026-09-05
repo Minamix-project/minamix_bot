@@ -19,32 +19,32 @@ async def register(bot):
         db = get_db_connection()
         cursor = db.cursor()
 
-        cursor.execute("SELECT COUNT(*), SUM(balance), AVG(balance), MIN(balance), MAX(balance) FROM guild_wallets")
+        cursor.execute("SELECT COUNT(*), SUM(balance), AVG(balance), MIN(balance), MAX(balance) FROM guild_wallets WHERE guild_id = %s", (interaction.guild_id,))
         total_users, total_supply, avg_balance, min_balance, max_balance = cursor.fetchone()
         total_supply = total_supply or 0
         avg_balance = avg_balance or 0
 
-        cursor.execute("SELECT balance FROM guild_wallets ORDER BY balance")
+        cursor.execute("SELECT balance FROM guild_wallets WHERE guild_id = %s ORDER BY balance", (interaction.guild_id,))
         all_balances = [row[0] for row in cursor.fetchall()]
         n = len(all_balances)
         median = all_balances[n // 2] if n else 0
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance = 0")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance = 0", (interaction.guild_id,))
         broke_users = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance BETWEEN 1 AND 999")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1 AND 999", (interaction.guild_id,))
         tier1 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance BETWEEN 1000 AND 9999")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 1000 AND 9999", (interaction.guild_id,))
         tier2 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance BETWEEN 10000 AND 49999")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance BETWEEN 10000 AND 49999", (interaction.guild_id,))
         tier3 = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance >= 50000")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= 50000", (interaction.guild_id,))
         tier4 = cursor.fetchone()[0]
 
-        cursor.execute("SELECT MIN(prix), MAX(prix), AVG(prix), COUNT(*) FROM guild_boutique_roles")
+        cursor.execute("SELECT MIN(prix), MAX(prix), AVG(prix), COUNT(*) FROM guild_boutique_roles WHERE guild_id = %s", (interaction.guild_id,))
         shop_min, shop_max, shop_avg, shop_count = cursor.fetchone()
 
-        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE balance >= (SELECT MIN(prix) FROM guild_boutique_roles)")
+        cursor.execute("SELECT COUNT(*) FROM guild_wallets WHERE guild_id = %s AND balance >= (SELECT MIN(prix) FROM guild_boutique_roles WHERE guild_id = %s)", (interaction.guild_id, interaction.guild_id))
         can_afford = cursor.fetchone()[0]
 
         cursor.close()

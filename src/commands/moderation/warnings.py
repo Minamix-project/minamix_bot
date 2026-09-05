@@ -6,8 +6,8 @@ from src.utils.embed import set_bot_footer
 
 async def register(bot):
     @bot.tree.command(name="warnings", description="Voir les avertissements d'un membre (Admin seulement)")
-    @app_commands.describe(user="Membre à consulter")
-    async def warnings(interaction: Interaction, user: Member):
+    @app_commands.describe(user="Membre à consulter", page="Page à afficher")
+    async def warnings(interaction: Interaction, user: Member, page: int = 1):
         if not interaction.user.guild_permissions.administrator:
             embed = discord.Embed(title="❌ Permission refusée", color=discord.Color.red())
             set_bot_footer(embed, interaction)
@@ -43,7 +43,9 @@ async def register(bot):
         )
         embed.set_thumbnail(url=user.display_avatar.url)
 
-        for num, (mod_id, reason, created_at) in enumerate(rows[:10], start=1):
+        page = max(page, 1)
+        start = (page - 1) * 10
+        for num, (mod_id, reason, created_at) in enumerate(rows[start:start + 10], start=start + 1):
             mod = interaction.guild.get_member(mod_id)
             mod_name = mod.display_name if mod else f"ID {mod_id}"
             embed.add_field(

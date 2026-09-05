@@ -71,7 +71,7 @@ async def register(bot):
         user_id = interaction.user.id
         current_time = int(time.time())
 
-        cursor.execute("SELECT last_work FROM users WHERE user_id = %s", (user_id,))
+        cursor.execute("SELECT last_work FROM guild_work_cooldowns WHERE guild_id = %s AND user_id = %s", (interaction.guild_id, user_id))
         result = cursor.fetchone()
 
         if result:
@@ -96,14 +96,14 @@ async def register(bot):
                     return
         else:
          
-            cursor.execute("INSERT INTO users (user_id, last_work) VALUES (%s, %s)", (user_id, 0))
+            cursor.execute("INSERT INTO guild_work_cooldowns (guild_id, user_id, last_work) VALUES (%s, %s, %s)", (interaction.guild_id, user_id, 0))
             db.commit()
 
         gain = random.randint(50, 250)
 
         new_balance = await modify_user_balance(db, interaction.guild_id, user_id, gain, "add")
 
-        cursor.execute("UPDATE users SET last_work = %s WHERE user_id = %s", (current_time, user_id))
+        cursor.execute("UPDATE guild_work_cooldowns SET last_work = %s WHERE guild_id = %s AND user_id = %s", (current_time, interaction.guild_id, user_id))
         db.commit()
 
         joke = random.choice(JOKES)

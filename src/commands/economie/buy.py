@@ -14,6 +14,26 @@ def _get_items(guild_id: int):
     return get_shop_items(guild_id)
 
 
+async def _send_purchase_log(interaction, role, prix, success: bool, detail: str):
+    db = get_db_connection()
+    try:
+        with db.cursor() as cursor:
+            cursor.execute("SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'", (interaction.guild_id,))
+            row = cursor.fetchone()
+    finally:
+        db.close()
+    if not row:
+        return
+    channel = interaction.guild.get_channel(int(row[0]))
+    if channel:
+        embed = Embed(title="🛒 Achat réussi" if success else "❌ Échec d'achat", color=discord.Color.green() if success else discord.Color.red())
+        embed.add_field(name="Utilisateur", value=interaction.user.mention)
+        embed.add_field(name="Rôle", value=role.mention if role else "Introuvable")
+        embed.add_field(name="Prix", value=f"{format_amount(prix)}💰")
+        embed.add_field(name="Détail", value=detail, inline=False)
+        await channel.send(embed=embed)
+
+
 async def _process_purchase(interaction: Interaction, role_id: int, prix: int, nom_role: str):
     await interaction.response.defer()
 
@@ -57,6 +77,7 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
                 await interaction.edit_original_response(
                     content="❌ Impossible d'attribuer ce rôle. Aucun coin n'a été retiré.", view=None
                 )
+                await _send_purchase_log(interaction, role, prix, False, "Attribution Discord refusée; aucun débit.")
                 return
 
             cursor.execute(
@@ -88,6 +109,7 @@ async def _process_purchase(interaction: Interaction, role_id: int, prix: int, n
     )
     set_bot_footer(embed, interaction)
     await interaction.edit_original_response(embed=embed, view=None)
+    await _send_purchase_log(interaction, role, prix, True, "Rôle attribué et solde débité.")
 
 
 async def _show_confirmation(interaction: Interaction, role_id: int, prix: int, nom_role: str, edit: bool = False):

@@ -1,4 +1,4 @@
-from discord import Interaction, Embed
+from discord import Interaction, Embed, app_commands
 import discord
 from src.utils.db import get_db_connection
 from src.utils.format import format_amount
@@ -11,7 +11,8 @@ def _resolve_name(user_id: int) -> str:
 
 async def register(bot):
     @bot.tree.command(name="leaderboard", description="Top 10 des utilisateurs les plus riches.")
-    async def leaderboard(interaction: Interaction):
+    @app_commands.describe(page="Page à afficher")
+    async def leaderboard(interaction: Interaction, page: int = 1):
         await interaction.response.defer()
 
         db = get_db_connection()
@@ -28,9 +29,11 @@ async def register(bot):
             await interaction.followup.send("Aucun utilisateur enregistré.", ephemeral=True)
             return
 
+        page = max(page, 1)
+        rows = rows[(page - 1) * 10:page * 10]
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         lines = []
-        rank = 0
+        rank = (page - 1) * 10
         for user_id, balance in rows:
             if not interaction.guild.get_member(user_id):
                 continue
@@ -38,7 +41,7 @@ async def register(bot):
             prefix = medals.get(rank, f"`#{rank}`")
             name = _resolve_name(user_id)
             lines.append(f"{prefix} {name} — **{format_amount(balance)}💰**")
-            if rank == 10:
+            if len(lines) == 10:
                 break
 
         embed = Embed(
