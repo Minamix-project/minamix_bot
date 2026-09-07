@@ -1,31 +1,35 @@
 import discord
 import time
 import logging
+import asyncio
+from collections import defaultdict
 from discord import Message, RawReactionActionEvent
 from src.config import GUILD_IDS
 from src.utils.rp import get_prefix_cache, normalize_discord_image_url
 
 _webhook_cache: dict[int, discord.Webhook] = {}
+_webhook_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 # message_id -> user_id : tracks webhook messages sent by characters this session
 _rp_messages: dict[int, tuple[int, float]] = {}
 _RP_MESSAGE_TTL = 3600
+_RP_COOLDOWN = 3
+_last_rp_message: dict[tuple[int, int, int], float] = {}
 logger = logging.getLogger(__name__)
 
 
 async def _get_or_create_webhook(channel: discord.TextChannel) -> discord.Webhook:
-    if channel.id in _webhook_cache:
-        return _webhook_cache[channel.id]
-
-    webhooks = await channel.webhooks()
-    for wh in webhooks:
-        if wh.name == "MinamixRP":
-            _webhook_cache[channel.id] = wh
-            return wh
-
-    wh = await channel.create_webhook(name="MinamixRP")
-    _webhook_cache[channel.id] = wh
-    return wh
+    async with _webhook_locks[channel.id]:
+        if channel.id in _webhook_cache:
+            return _webhook_cache[channel.id]
+        webhooks = await channel.webhooks()
+        for wh in webhooks:
+            if wh.name == "MinamixRP":
+                _webhook_cache[channel.id] = wh
+                return wh
+        wh = await channel.create_webhook(name="MinamixRP")
+        _webhook_cache[channel.id] = wh
+        return wh
 
 
 async def register(bot):
@@ -53,14 +57,22 @@ async def register(bot):
             if content.startswith(prefix):
                 char_id, user_id, char_name, image_url = char_data
                 if message.author.id == user_id:
-                    matched_char = (char_name, image_url, user_id)
+                    matched_char = (char_id, char_name, image_url, user_id)
                     matched_prefix = prefix
                     break
 
         if not matched_char:
             return
 
-        char_name, image_url, owner_id = matched_char
+        char_id, char_name, image_url, owner_id = matched_char
+        now = time.time()
+        cooldown_key = (message.guild.id, message.author.id, char_id)
+        if now - _last_rp_message.get(cooldown_key, 0) < _RP_COOLDOWN:
+            return
+        _last_rp_message[cooldown_key] = now
+        for key, sent_at in list(_last_rp_message.items()):
+            if now - sent_at > 3600:
+                _last_rp_message.pop(key, None)
         spoken_text = content[len(matched_prefix):].strip()
         if not spoken_text:
             return
@@ -70,13 +82,22 @@ async def register(bot):
 
         try:
             webhook = await _get_or_create_webhook(message.channel)
-            msg = await webhook.send(
-                content=spoken_text,
-                username=char_name,
-                avatar_url=normalize_discord_image_url(image_url),
-                allowed_mentions=discord.AllowedMentions.none(),
-                wait=True,
-            )
+            try:
+                msg = await webhook.send(
+                    content=spoken_text[:2000],
+                    username=char_name[:80],
+                    avatar_url=normalize_discord_image_url(image_url),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    wait=True,
+                )
+            except discord.NotFound:
+                _webhook_cache.pop(message.channel.id, None)
+                webhook = await _get_or_create_webhook(message.channel)
+                msg = await webhook.send(
+                    content=spoken_text[:2000], username=char_name[:80],
+                    avatar_url=normalize_discord_image_url(image_url),
+                    allowed_mentions=discord.AllowedMentions.none(), wait=True,
+                )
             _rp_messages[msg.id] = (owner_id, time.time())
             try:
                 await message.delete()

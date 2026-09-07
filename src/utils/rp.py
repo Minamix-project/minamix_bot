@@ -11,6 +11,21 @@ def normalize_discord_image_url(url: str) -> str:
     return url
 
 
+def image_url_from_message(message, fallback: str | None = None) -> str | None:
+    """Extract the permanent image URL from an uploaded RP sheet message."""
+    for attachment in getattr(message, "attachments", ()):
+        if getattr(attachment, "content_type", "").startswith("image/"):
+            return normalize_discord_image_url(attachment.url)
+    for embed in getattr(message, "embeds", ()):
+        image = getattr(embed, "image", None)
+        url = getattr(image, "url", None)
+        if url:
+            return normalize_discord_image_url(url)
+    if fallback and "/ephemeral-attachments/" not in fallback:
+        return normalize_discord_image_url(fallback)
+    return None
+
+
 def prefixes_too_close(candidate: str, existing: str) -> bool:
     """Reject visually ambiguous prefixes without imposing a fixed naming style."""
     left = candidate.strip().casefold().rstrip(" :!?-_·")
