@@ -10,13 +10,13 @@ from discord import app_commands
 
 load_dotenv()
 
-from src.config import GUILD_IDS
-from src.core.db_init import init_db
-from src.core.loader import load_modules
-from src.utils.db import close_db_pool, create_db_pool, get_db_connection
-from src.utils.permissions import ADMIN_COMMANDS
-from src.utils.audit import record_admin_action
-from src.utils.error_reporting import report_error
+from src.config import GUILD_IDS  # noqa: E402
+from src.core.db_init import init_db  # noqa: E402
+from src.core.loader import load_modules  # noqa: E402
+from src.utils.db import close_db_pool, create_db_pool, get_db_connection  # noqa: E402
+from src.utils.permissions import ADMIN_COMMANDS  # noqa: E402
+from src.utils.audit import record_admin_action  # noqa: E402
+from src.utils.error_reporting import report_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

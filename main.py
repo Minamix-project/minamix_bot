@@ -7,7 +7,7 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from src.bot import run_bot
+from src.bot import run_bot  # noqa: E402
 
 if __name__ == "__main__":
     run_bot()
