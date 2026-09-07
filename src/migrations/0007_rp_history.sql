@@ -7,7 +7,7 @@ CREATE TABLE rp_character_history (
     snapshot JSON NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_rp_history_character (guild_id, character_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE rp_message_cooldowns (
     guild_id BIGINT UNSIGNED NOT NULL,
