@@ -102,9 +102,15 @@ services:
       - -c
       - |
         set -eu
+        json_escape() {
+          printf '%s' "$$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]/ /g'
+        }
         write_status() {
           ts=$$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          printf '{"file":"%s","status":"%s","detail":"%s","tested_at":"%s"}' "$$1" "$$2" "$$3" "$$ts" > /status/last_restore_test.json.tmp
+          file=$$(json_escape "$$1")
+          status=$$(json_escape "$$2")
+          detail=$$(json_escape "$$3")
+          printf '{"file":"%s","status":"%s","detail":"%s","tested_at":"%s"}' "$$file" "$$status" "$$detail" "$$ts" > /status/last_restore_test.json.tmp
           mv /status/last_restore_test.json.tmp /status/last_restore_test.json
         }
         test_restore() {
