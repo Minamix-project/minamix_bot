@@ -151,6 +151,7 @@ receive a short reference and can be sent to the channel configured with
 | `/rpimage <user> <image>` | Change an image — admin |
 | `/rpdelete <user>` | Delete a character — admin |
 | `/rphealth` | Check RP image references — admin |
+| `/rpmaintenance <enabled>` | Pause or resume RP webhook messages — admin |
 | `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |

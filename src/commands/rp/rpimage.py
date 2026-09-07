@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import image_url_from_message, invalidate_cache
+from src.utils.rp import image_url_from_message, invalidate_cache, record_character_history
 from src.utils.views import ExpiringView
 
 
@@ -79,6 +79,11 @@ async def register(bot):
             await cursor2.execute(
                 "UPDATE rp_characters SET image_url = %s, sheet_channel_id = %s, sheet_message_id = %s WHERE id = %s",
                 (stable_url, rp_channel.id, msg.id, char_id)
+            )
+            await record_character_history(
+                cursor2, character_id=char_id, guild_id=inter.guild.id,
+                actor_id=inter.user.id, action="image",
+                snapshot={"name": char_name, "image_url": stable_url},
             )
             await db2.commit()
             await cursor2.close()

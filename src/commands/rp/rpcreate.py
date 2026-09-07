@@ -3,7 +3,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import image_url_from_message, invalidate_cache, prefixes_too_close
+from src.utils.rp import image_url_from_message, invalidate_cache, prefixes_too_close, record_character_history
 
 
 async def register(bot):
@@ -83,8 +83,13 @@ async def register(bot):
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (interaction.guild.id, user.id, name, prefix, stable_url, rp_channel.id, msg.id)
             )
-            await db.commit()
             char_id = cursor.lastrowid
+            await record_character_history(
+                cursor, character_id=char_id, guild_id=interaction.guild.id,
+                actor_id=interaction.user.id, action="create",
+                snapshot={"user_id": user.id, "name": name, "prefix": prefix, "image_url": stable_url},
+            )
+            await db.commit()
         except Exception as e:
             await cursor.close()
             db.close()
