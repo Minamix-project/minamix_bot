@@ -10,13 +10,13 @@ from discord import app_commands
 
 load_dotenv()
 
-from src.config import GUILD_IDS
-from src.core.db_init import init_db
-from src.core.loader import load_modules
-from src.utils.db import close_db_pool, create_db_pool, get_db_connection
-from src.utils.permissions import ADMIN_COMMANDS
-from src.utils.audit import record_admin_action
-from src.utils.error_reporting import report_error
+from src.config import GUILD_IDS  # noqa: E402
+from src.core.db_init import init_db  # noqa: E402
+from src.core.loader import load_modules  # noqa: E402
+from src.utils.db import close_db_pool, create_db_pool, get_db_connection  # noqa: E402
+from src.utils.permissions import ADMIN_COMMANDS  # noqa: E402
+from src.utils.audit import record_admin_action  # noqa: E402
+from src.utils.error_reporting import report_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ async def _main():
 
     _last_notified_backup_test = {"tested_at": None}
     _ready_handled = False
+    ready_file = Path("/tmp/minamix-ready")
     backup_test_status_file = Path("backup_test_status/last_restore_test.json")
 
     @tasks.loop(hours=1)
@@ -150,6 +151,13 @@ async def _main():
                 await channel.send(embed=embed)
             except (discord.Forbidden, discord.HTTPException):
                 pass
+
+    @tasks.loop(seconds=30)
+    async def heartbeat():
+        try:
+            ready_file.touch()
+        except OSError:
+            logger.exception("Could not update bot health heartbeat")
 
     @bot.event
     async def on_app_command_completion(interaction, command):
@@ -196,6 +204,8 @@ async def _main():
 
         if not check_backup_test_status.is_running():
             check_backup_test_status.start()
+        if not heartbeat.is_running():
+            heartbeat.start()
 
     await load_modules(bot, "src/events", "EVENT")
     await load_modules(bot, "src/commands", "CMD")
@@ -205,6 +215,11 @@ async def _main():
     except KeyboardInterrupt:
         await bot.close()
     finally:
+        heartbeat.cancel()
+        try:
+            ready_file.unlink(missing_ok=True)
+        except OSError:
+            pass
         await close_db_pool()
 
 

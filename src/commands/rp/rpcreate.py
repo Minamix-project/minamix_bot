@@ -3,7 +3,7 @@ import discord
 from discord import Interaction, Member, app_commands
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache, normalize_discord_image_url, prefixes_too_close
+from src.utils.rp import image_url_from_message, invalidate_cache, prefixes_too_close, record_character_history
 
 
 async def register(bot):
@@ -59,7 +59,11 @@ async def register(bot):
         sheet_embed.add_field(name="Préfixe", value=f"`{prefix}`", inline=True)
 
         msg = await rp_channel.send(embed=sheet_embed, file=file)
-        stable_url = normalize_discord_image_url(msg.attachments[0].url if msg.attachments else image.url)
+        stable_url = image_url_from_message(msg, image.url)
+        if not stable_url:
+            await msg.delete()
+            await interaction.edit_original_response(content="❌ Discord n’a pas confirmé l’image envoyée.")
+            return
 
         db = await get_db_connection()
         cursor = await db.cursor()
@@ -79,8 +83,13 @@ async def register(bot):
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (interaction.guild.id, user.id, name, prefix, stable_url, rp_channel.id, msg.id)
             )
-            await db.commit()
             char_id = cursor.lastrowid
+            await record_character_history(
+                cursor, character_id=char_id, guild_id=interaction.guild.id,
+                actor_id=interaction.user.id, action="create",
+                snapshot={"user_id": user.id, "name": name, "prefix": prefix, "image_url": stable_url},
+            )
+            await db.commit()
         except Exception as e:
             await cursor.close()
             db.close()

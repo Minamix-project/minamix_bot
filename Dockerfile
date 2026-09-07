@@ -16,4 +16,6 @@ COPY --chown=minamix:minamix . .
 
 USER minamix
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 CMD ["sh", "-c", "test -f /tmp/minamix-ready && test $(find /tmp/minamix-ready -mmin -1 -print | wc -l) -eq 1"]
+
 CMD ["python", "main.py"]

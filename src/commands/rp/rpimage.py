@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache, normalize_discord_image_url
+from src.utils.rp import image_url_from_message, invalidate_cache, record_character_history
 from src.utils.views import ExpiringView
 
 
@@ -68,13 +68,22 @@ async def register(bot):
                 content=f"*Mise à jour de l'image de **{char_name}** :*",
                 file=file
             )
-            stable_url = normalize_discord_image_url(msg.attachments[0].url if msg.attachments else image.url)
+            stable_url = image_url_from_message(msg, image.url)
+            if not stable_url:
+                await msg.delete()
+                await inter.edit_original_response(content="❌ Discord n’a pas confirmé l’image envoyée.")
+                return
 
             db2 = await get_db_connection()
             cursor2 = await db2.cursor()
             await cursor2.execute(
                 "UPDATE rp_characters SET image_url = %s, sheet_channel_id = %s, sheet_message_id = %s WHERE id = %s",
                 (stable_url, rp_channel.id, msg.id, char_id)
+            )
+            await record_character_history(
+                cursor2, character_id=char_id, guild_id=inter.guild.id,
+                actor_id=inter.user.id, action="image",
+                snapshot={"name": char_name, "image_url": stable_url},
             )
             await db2.commit()
             await cursor2.close()

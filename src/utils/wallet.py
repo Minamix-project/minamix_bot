@@ -8,8 +8,10 @@ def calculate_balance(current: int, amount: int, operation: str, cap: int | None
     if operation == "add":
         value = current + amount
         return min(value, cap) if cap is not None else value
-    if operation == "remove": return max(current - amount, 0)
-    if operation == "set": return amount
+    if operation == "remove":
+        return max(current - amount, 0)
+    if operation == "set":
+        return amount
     raise ValueError(f"Unknown operation: {operation}")
 
 

@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select, Modal, TextInput
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache, prefixes_too_close
+from src.utils.rp import invalidate_cache, prefixes_too_close, record_character_history
 from src.utils.views import ExpiringView
 
 
@@ -112,6 +112,11 @@ async def register(bot):
                         await cursor2.execute(
                             f"UPDATE rp_characters SET {', '.join(updates)} WHERE id = %s",
                             values
+                        )
+                        await record_character_history(
+                            cursor2, character_id=char_id, guild_id=modal_inter.guild.id,
+                            actor_id=modal_inter.user.id, action="edit",
+                            snapshot={"name": name_val, "prefix": prefix_val},
                         )
                         await db2.commit()
                     except Exception as e:

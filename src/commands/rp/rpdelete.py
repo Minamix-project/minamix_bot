@@ -4,7 +4,7 @@ from discord import Interaction, Member, app_commands
 from discord.ui import Select
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
-from src.utils.rp import invalidate_cache
+from src.utils.rp import invalidate_cache, record_character_history
 from src.utils.views import ExpiringView
 from src.utils.confirm import confirm_action
 
@@ -53,6 +53,11 @@ async def register(bot):
             async def on_confirm(confirm_inter: Interaction):
                 db2 = await get_db_connection()
                 cursor2 = await db2.cursor()
+                await record_character_history(
+                    cursor2, character_id=char_id, guild_id=confirm_inter.guild.id,
+                    actor_id=confirm_inter.user.id, action="delete",
+                    snapshot={"name": char_name, "prefix": char_prefix, "nax_balance": nax_balance},
+                )
                 await cursor2.execute("DELETE FROM rp_characters WHERE id = %s", (char_id,))
                 await db2.commit()
                 await cursor2.close()
