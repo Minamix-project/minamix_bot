@@ -206,3 +206,16 @@ tests/
 The bot container runs as a non-root user with a read-only filesystem, a
 temporary `/tmp`, no Linux capabilities, and `no-new-privileges`. Docker
 images and Python dependencies are pinned for reproducible builds.
+
+## Legal pages
+
+Before submitting the application for Discord verification, publish the static
+pages in `docs/` over HTTPS (for example with GitHub Pages). Review the owner,
+contact email, date, and retention period in `docs/privacy.html` and
+`docs/terms.html`. Then enter the public URLs in the
+Discord Developer Portal under **General Information**:
+
+```text
+https://minamix-project.github.io/minamix_bot/privacy.html
+https://minamix-project.github.io/minamix_bot/terms.html
+```
