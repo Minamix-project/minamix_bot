@@ -21,6 +21,22 @@ async def _characters(guild_id, user_id):
         db.close()
 
 
+async def _notify_recipient(sender, recipient, amount, reason, currency):
+    """Send a compact DM after a successful transfer without blocking it."""
+    unit = "💰" if currency == "money" else NAX_EMOJI
+    embed = discord.Embed(
+        title="💸 Transfert reçu",
+        description=f"Vous avez reçu **{format_amount(amount)} {unit}** de {sender.mention}.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="Motif", value=reason, inline=False)
+    try:
+        await recipient.send(embed=embed)
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    return True
+
+
 def _error_description(status, details, currency):
     unit = "💰" if currency == "money" else NAX_EMOJI
     if status == "daily_limit" and details:
@@ -47,7 +63,9 @@ async def _execute(interaction, recipient, amount, reason, currency, sender_char
         embed = discord.Embed(title="❌ Transfert impossible", description=_error_description(status, sender_balance, currency), color=discord.Color.red())
     else:
         unit = "💰" if currency == "money" else NAX_EMOJI
-        embed = discord.Embed(title="✅ Transfert effectué", description=f"**{format_amount(amount)} {unit}** envoyés à {recipient.mention}\nMotif : {reason}\nVotre nouveau solde : **{format_amount(sender_balance)} {unit}**", color=discord.Color.green())
+        notified = await _notify_recipient(interaction.user, recipient, amount, reason, currency)
+        notice = "\n📩 Le destinataire a été informé par MP." if notified else "\nℹ️ Le transfert est effectué, mais le MP n’a pas pu être envoyé."
+        embed = discord.Embed(title="✅ Transfert effectué", description=f"**{format_amount(amount)} {unit}** envoyés à {recipient.mention}\nMotif : {reason}\nVotre nouveau solde : **{format_amount(sender_balance)} {unit}**{notice}", color=discord.Color.green())
     set_bot_footer(embed, interaction)
     return embed
 
