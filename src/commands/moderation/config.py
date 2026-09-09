@@ -3,7 +3,10 @@ from discord import Interaction
 
 from src.utils.db import get_db_connection
 from src.utils.embed import set_bot_footer
+from src.utils.format import format_amount
 from src.utils.permissions import admin_only
+from src.utils.economy_config import get_guild_economy_config
+from src.commands.rp.rpnax import NAX_EMOJI
 
 
 _CONFIG_LABELS = {
@@ -35,6 +38,8 @@ async def register(bot):
         finally:
             db.close()
 
+        economy = await get_guild_economy_config(interaction.guild_id)
+
         embed = discord.Embed(title="⚙️ Salons configurés", color=discord.Color.blurple())
         if not rows:
             embed.description = "Aucun salon n'est configuré sur ce serveur."
@@ -48,6 +53,22 @@ async def register(bot):
 
                 value = f"{channel.mention} — **#{channel.name}**" if channel else f"⚠️ Salon introuvable (`{channel_id}`)"
                 embed.add_field(name=label, value=value, inline=False)
+
+        embed.add_field(
+            name="Transferts entre joueurs",
+            value=(
+                "💰 — délai : **{} min** · limite/jour : **{}**\n"
+                "{} — délai : **{} min** · limite/jour : **{}**\n"
+                "Modification : `/economyconfig`"
+            ).format(
+                economy["transfer_cooldown_seconds"] // 60,
+                format_amount(economy["transfer_daily_limit"]),
+                NAX_EMOJI,
+                economy["nax_transfer_cooldown_seconds"] // 60,
+                format_amount(economy["nax_transfer_daily_limit"]),
+            ),
+            inline=False,
+        )
 
         if migration_count:
             embed.add_field(

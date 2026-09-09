@@ -11,10 +11,11 @@ async def _claim_transfer_limit(cursor, guild_id, sender_id, currency, amount, n
     await cursor.execute("SELECT amount, last_transfer_at FROM guild_transfer_daily_totals WHERE guild_id = %s AND user_id = %s AND currency = %s AND transfer_date = CURDATE() FOR UPDATE", (guild_id, sender_id, currency))
     sent_today, last_transfer_at = await cursor.fetchone()
     if cooldown and last_transfer_at and now - last_transfer_at < cooldown:
-        return "cooldown"
+        return "cooldown", {"cooldown_remaining": cooldown - (now - last_transfer_at)}
     if daily_limit and sent_today + amount > daily_limit:
-        return "daily_limit"
+        return "daily_limit", {"sent_today": sent_today, "daily_limit": daily_limit, "remaining": max(daily_limit - sent_today, 0)}
     await cursor.execute("UPDATE guild_transfer_daily_totals SET amount = amount + %s, last_transfer_at = %s WHERE guild_id = %s AND user_id = %s AND currency = %s AND transfer_date = CURDATE()", (amount, now, guild_id, sender_id, currency))
+    return None, None
 
 
 async def _record_transfer(cursor, guild_id, currency, sender_id, recipient_id, amount, reason, sender_character_id=None, recipient_character_id=None):
@@ -28,10 +29,10 @@ async def transfer_money(db, guild_id, sender_id, recipient_id, amount, reason):
     await db.begin()
     try:
         async with db.cursor() as cursor:
-            status = await _claim_transfer_limit(cursor, guild_id, sender_id, "money", amount, now, config["transfer_cooldown_seconds"], config["transfer_daily_limit"])
+            status, transfer_details = await _claim_transfer_limit(cursor, guild_id, sender_id, "money", amount, now, config["transfer_cooldown_seconds"], config["transfer_daily_limit"])
             if status:
                 await db.rollback()
-                return False, status, None, None
+                return False, status, transfer_details, None
             for user_id in sorted((sender_id, recipient_id)):
                 await cursor.execute("INSERT INTO guild_wallets (guild_id, user_id, balance) VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)", (guild_id, user_id, config["starting_balance"]))
             balances = {}
@@ -65,10 +66,10 @@ async def transfer_nax(db, guild_id, sender_id, recipient_id, sender_character_i
     await db.begin()
     try:
         async with db.cursor() as cursor:
-            status = await _claim_transfer_limit(cursor, guild_id, sender_id, "nax", amount, now, config["nax_transfer_cooldown_seconds"], config["nax_transfer_daily_limit"])
+            status, transfer_details = await _claim_transfer_limit(cursor, guild_id, sender_id, "nax", amount, now, config["nax_transfer_cooldown_seconds"], config["nax_transfer_daily_limit"])
             if status:
                 await db.rollback()
-                return False, status, None, None
+                return False, status, transfer_details, None
             characters = {}
             for character_id in sorted((sender_character_id, recipient_character_id)):
                 await cursor.execute("SELECT user_id, nax_balance FROM rp_characters WHERE id = %s AND guild_id = %s FOR UPDATE", (character_id, guild_id))

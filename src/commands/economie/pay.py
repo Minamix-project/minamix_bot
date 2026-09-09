@@ -21,6 +21,18 @@ async def _characters(guild_id, user_id):
         db.close()
 
 
+def _error_description(status, details, currency):
+    unit = "💰" if currency == "money" else NAX_EMOJI
+    if status == "daily_limit" and details:
+        return (f"Limite quotidienne : **{format_amount(details['daily_limit'])} {unit}**\n"
+                f"Déjà transféré : **{format_amount(details['sent_today'])} {unit}**\n"
+                f"Montant restant : **{format_amount(details['remaining'])} {unit}**")
+    if status == "cooldown" and details:
+        seconds = max(1, details['cooldown_remaining'])
+        return f"Vous devez attendre encore **{seconds // 60} min {seconds % 60} s** avant un nouveau transfert."
+    return ERRORS.get(status, "Une erreur est survenue.")
+
+
 async def _execute(interaction, recipient, amount, reason, currency, sender_character=None, recipient_character=None):
     db = await get_db_connection()
     try:
@@ -32,7 +44,7 @@ async def _execute(interaction, recipient, amount, reason, currency, sender_char
         db.close()
     ok, status, sender_balance, _ = result
     if not ok:
-        embed = discord.Embed(title="❌ Transfert impossible", description=ERRORS.get(status, "Une erreur est survenue."), color=discord.Color.red())
+        embed = discord.Embed(title="❌ Transfert impossible", description=_error_description(status, sender_balance, currency), color=discord.Color.red())
     else:
         unit = "💰" if currency == "money" else NAX_EMOJI
         embed = discord.Embed(title="✅ Transfert effectué", description=f"**{format_amount(amount)} {unit}** envoyés à {recipient.mention}\nMotif : {reason}\nVotre nouveau solde : **{format_amount(sender_balance)} {unit}**", color=discord.Color.green())
