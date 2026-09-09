@@ -16,6 +16,8 @@ def _config_lines(config: dict) -> list[str]:
         f"**Gain par message (≥1000 caractères) :** {config['message_gain_long_min']} – {config['message_gain_long_max']}💰",
         f"**Solde initial :** {format_amount(config['starting_balance'])}💰",
         f"**Plafond :** {format_amount(cap) + '💰' if cap is not None else 'Aucun'}",
+        f"**Transferts 💰 :** délai {config['transfer_cooldown_seconds'] // 60} min · limite/jour {format_amount(config['transfer_daily_limit'])}💰",
+        f"**Transferts NAX :** délai {config['nax_transfer_cooldown_seconds'] // 60} min · limite/jour {format_amount(config['nax_transfer_daily_limit'])} NAX",
     ]
 
 
@@ -34,6 +36,10 @@ async def register(bot):
         message_gain_long_max="Gain maximum par message long (≥1000 caractères)",
         starting_balance="Solde initial d'un nouveau membre",
         balance_cap="Plafond de solde (0 = aucun plafond)",
+        transfer_cooldown_minutes="Délai entre deux transferts 💰, en minutes (0 = désactivé)",
+        transfer_daily_limit="Maximum transférable en 💰 par jour (0 = désactivé)",
+        nax_transfer_cooldown_minutes="Délai entre deux transferts NAX, en minutes (0 = désactivé)",
+        nax_transfer_daily_limit="Maximum transférable en NAX par jour (0 = désactivé)",
     )
     @admin_only()
     async def economyconfig(
@@ -47,6 +53,10 @@ async def register(bot):
         message_gain_long_max: int = None,
         starting_balance: int = None,
         balance_cap: int = None,
+        transfer_cooldown_minutes: int = None,
+        transfer_daily_limit: int = None,
+        nax_transfer_cooldown_minutes: int = None,
+        nax_transfer_daily_limit: int = None,
     ):
         invalid = None
         non_negative_values = {
@@ -58,6 +68,10 @@ async def register(bot):
             "message_gain_long_max": message_gain_long_max,
             "starting_balance": starting_balance,
             "balance_cap": balance_cap,
+            "transfer_cooldown_minutes": transfer_cooldown_minutes,
+            "transfer_daily_limit": transfer_daily_limit,
+            "nax_transfer_cooldown_minutes": nax_transfer_cooldown_minutes,
+            "nax_transfer_daily_limit": nax_transfer_daily_limit,
         }
         for field, value in non_negative_values.items():
             if value is not None and value < 0:
@@ -95,6 +109,14 @@ async def register(bot):
             changes["starting_balance"] = starting_balance
         if balance_cap is not None:
             changes["balance_cap"] = balance_cap if balance_cap > 0 else None
+        if transfer_cooldown_minutes is not None:
+            changes["transfer_cooldown_seconds"] = transfer_cooldown_minutes * 60
+        if transfer_daily_limit is not None:
+            changes["transfer_daily_limit"] = transfer_daily_limit
+        if nax_transfer_cooldown_minutes is not None:
+            changes["nax_transfer_cooldown_seconds"] = nax_transfer_cooldown_minutes * 60
+        if nax_transfer_daily_limit is not None:
+            changes["nax_transfer_daily_limit"] = nax_transfer_daily_limit
 
         if changes:
             current = await get_guild_economy_config(interaction.guild_id)
