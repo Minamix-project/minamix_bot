@@ -16,6 +16,8 @@ _TYPE_LABELS = {
     "admin_remove": "➖ Retrait admin",
     "admin_giveitem": "🎁 Article offert",
     "reset_admin": "🚨 Reset admin",
+    "transfer_sent": "↗️ Transfert envoyé",
+    "transfer_received": "↘️ Transfert reçu",
 }
 
 

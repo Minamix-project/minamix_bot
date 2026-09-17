@@ -14,6 +14,10 @@ DEFAULTS = {
     "message_gain_long_max": 50,
     "starting_balance": 0,
     "balance_cap": None,
+    "transfer_cooldown_seconds": 300,
+    "transfer_daily_limit": 10000,
+    "nax_transfer_cooldown_seconds": 300,
+    "nax_transfer_daily_limit": 10000,
 }
 
 _COLUMNS = list(DEFAULTS.keys())
