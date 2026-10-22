@@ -17,7 +17,7 @@ from src.utils.reminders import (
 
 Delivery = Literal["dm", "current", "channel"]
 Category = Literal["custom", "staff_meeting", "deadline", "ooc_event", "rp_event"]
-_NOT_FOUND = "Rappel introuvable, modifié, déjà envoyé ou en cours d'envoi. Utilise `/rappel liste`."
+_NOT_FOUND = "Rappel introuvable, modifié, déjà envoyé ou en cours d'envoi. Utilise `/reminder list`."
 _STATUS_LABELS = {"pending": "En attente", "sending": "En cours d'envoi", "sent": "Envoyé", "failed": "Échec"}
 _DELIVERY_CHOICES = [
     app_commands.Choice(name="Message privé", value="dm"),
@@ -33,12 +33,12 @@ def destination(interaction, delivery: Delivery | None, channel, previous: int |
             raise ValueError("Choisis l'envoi dans un salon pour sélectionner un salon de destination.")
         return channel.id
     if delivery == "channel":
-        raise ValueError("Sélectionne une destination avec l'option salon.")
+        raise ValueError("Sélectionne une destination avec l'option channel.")
     if delivery == "dm":
         return None
     if delivery == "current":
         if not isinstance(interaction.channel, discord.TextChannel):
-            raise ValueError("Sélectionne un salon textuel du serveur avec l'option salon.")
+            raise ValueError("Sélectionne un salon textuel du serveur avec l'option channel.")
         return interaction.channel_id
     return previous
 
@@ -51,12 +51,10 @@ def summary(reminder: Reminder) -> str:
 @app_commands.guild_only()
 class Remind(app_commands.Group):
     def __init__(self):
-        super().__init__(name="rappel", description="Créer et gérer tes rappels.")
+        super().__init__(name="reminder", description="Créer et gérer tes rappels.")
 
-    @app_commands.command(name="creer", description="Programmer un rappel ponctuel, envoyé en message privé par défaut.")
+    @app_commands.command(name="create", description="Programmer un rappel ponctuel, envoyé en message privé par défaut.")
     @app_commands.checks.cooldown(3, 60, key=lambda interaction: (interaction.guild_id, interaction.user.id))
-    @app_commands.rename(when="quand", text="texte", delivery="envoi", channel="salon", timezone="fuseau_horaire",
-                         recipients="destinataires", category="categorie")
     @app_commands.choices(delivery=_DELIVERY_CHOICES, category=_CATEGORY_CHOICES)
     @app_commands.describe(
         when="2h, 1j 30m, demain 18:00, HH:MM ou JJ/MM/AAAA HH:MM",
@@ -88,7 +86,7 @@ class Remind(app_commands.Group):
             return
         await interaction.followup.send(summary(reminder), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @app_commands.command(name="liste", description="Afficher tes rappels en attente et les échecs d'envoi sur ce serveur.")
+    @app_commands.command(name="list", description="Afficher tes rappels en attente et les échecs d'envoi sur ce serveur.")
     async def list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         reminders = await list_reminders(interaction.guild_id, interaction.user.id)
@@ -112,7 +110,7 @@ class Remind(app_commands.Group):
                     name=f"#{reminder.id} · {CATEGORIES[reminder.category]} · {_STATUS_LABELS[reminder.status]}",
                     value=value, inline=False,
                 )
-            embed.set_footer(text="Utilise /rappel modifier ou /rappel supprimer avec l'identifiant du rappel.")
+            embed.set_footer(text="Utilise /reminder edit ou /reminder delete avec l'identifiant du rappel.")
             return embed
 
         view = PaginationView(interaction.user.id, (len(reminders) + 4) // 5, render)
@@ -121,21 +119,18 @@ class Remind(app_commands.Group):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @app_commands.command(name="supprimer", description="Supprimer l'un de tes rappels en attente ou en échec.")
-    @app_commands.rename(reminder_id="identifiant")
-    @app_commands.describe(reminder_id="L'identifiant du rappel affiché par /rappel liste")
+    @app_commands.command(name="delete", description="Supprimer l'un de tes rappels en attente ou en échec.")
+    @app_commands.describe(reminder_id="L'identifiant du rappel affiché par /reminder list")
     async def delete(self, interaction: discord.Interaction, reminder_id: str):
         await interaction.response.defer(ephemeral=True)
         parsed_id = self.parse_id(reminder_id)
         deleted = parsed_id is not None and await delete_reminder(parsed_id, interaction.guild_id, interaction.user.id)
         await interaction.followup.send("Rappel supprimé." if deleted else _NOT_FOUND, ephemeral=True)
 
-    @app_commands.command(name="modifier", description="Modifier l'un de tes rappels en attente ou en échec.")
-    @app_commands.rename(reminder_id="identifiant", when="quand", text="texte", delivery="envoi", channel="salon",
-                         timezone="fuseau_horaire", recipients="destinataires", category="categorie")
+    @app_commands.command(name="edit", description="Modifier l'un de tes rappels en attente ou en échec.")
     @app_commands.choices(delivery=_DELIVERY_CHOICES, category=_CATEGORY_CHOICES)
     @app_commands.describe(
-        reminder_id="L'identifiant du rappel affiché par /rappel liste",
+        reminder_id="L'identifiant du rappel affiché par /reminder list",
         when="Nouvelle date : 2h, demain 18:00, HH:MM ou JJ/MM/AAAA HH:MM",
         text="Le nouveau texte libre du rappel",
         delivery="Changer le mode d'envoi ; le message privé retire les destinataires supplémentaires",
@@ -170,7 +165,7 @@ class Remind(app_commands.Group):
                 recipient_ids=recipient_ids, category=category if category is not None else reminder.category,
             ))
             if updated.due_at <= time.time():
-                raise ValueError("Indique une nouvelle date dans le futur avec l'option quand.")
+                raise ValueError("Indique une nouvelle date dans le futur avec l'option when.")
             await validate_destination(interaction.client, updated)
             saved = await edit_reminder(updated)
         except (ValueError, discord.Forbidden, discord.NotFound) as exc:

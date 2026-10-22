@@ -47,7 +47,7 @@ async def notify_failure(bot, reminder) -> None:
         user = bot.get_user(reminder.user_id) or await bot.fetch_user(reminder.user_id)
         await user.send(
             f"Le rappel #{reminder.id} n'a pas pu être envoyé. "
-            "Utilise `/rappel liste` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
+            "Utilise `/reminder list` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:

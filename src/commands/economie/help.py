@@ -7,7 +7,7 @@ from src.utils.permissions import is_admin
 
 
 _GENERAL = (
-    "`/rappel creer|liste|modifier|supprimer` — Programmer et gérer tes rappels\n"
+    "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
     "`/back` — Mettre fin à ton absence\n"
     "`/status` — Voir l'état et la version du bot\n"

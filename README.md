@@ -86,46 +86,47 @@ the bot at runtime.
 | `/back` | Clear your absence status |
 | `/absents` | List absent members — admin |
 | `/activity <user>` | View a member's activity — admin |
-| `/rappel creer <quand> <texte> [...]` | Schedule a reminder, delivered by DM by default |
-| `/rappel liste` | List your pending reminders and delivery failures in this server |
-| `/rappel modifier <identifiant> [...]` | Update one of your pending or failed reminders |
-| `/rappel supprimer <identifiant>` | Delete one of your pending or failed reminders |
+| `/reminder create <when> <text> [...]` | Schedule a reminder, delivered by DM by default |
+| `/reminder list` | List your pending reminders and delivery failures in this server |
+| `/reminder edit <reminder_id> [...]` | Update one of your pending or failed reminders |
+| `/reminder delete <reminder_id>` | Delete one of your pending or failed reminders |
 
 ### Reminders
 
-Reminder commands, option names, choices, and bot messages are in French.
+Reminder command and option names follow the bot's English naming convention.
+Descriptions, choice labels, and bot messages are in French.
 Use a duration (`2h`, `1j 30m`, `1sem`), a date and time
 (`15/09/2027 20:00` or `2027-09-15 20:00`), `demain 18:00`,
 `aujourd'hui 18:00`, or a time such as `18:00` for today. Existing English
 duration units (`d`, `w`) and day names (`today`, `tomorrow`) remain accepted.
-Dates use **Europe/Brussels** unless you provide an IANA `fuseau_horaire`, such as
+Dates use **Europe/Brussels** unless you provide an IANA `timezone`, such as
 `UTC` or `America/Montreal`. Durations measure elapsed time. Past dates,
 invalid dates, ambiguous/nonexistent daylight-saving times, and schedules more
 than five years ahead are rejected. Discord displays confirmations in each
 reader's local timezone.
 
 ```text
-/rappel creer quand:2h texte:Vérifier les annonces
-/rappel creer quand:demain 18:00 texte:Réunion du staff envoi:Salon actuel categorie:Réunion du staff
-/rappel creer quand:15/09/2027 20:00 texte:Événement de guilde salon:#evenements destinataires:@Alice @Bob categorie:Événement RP
-/rappel modifier identifiant:42 quand:3h texte:Nouvel horaire de réunion
-/rappel modifier identifiant:42 destinataires:aucun mention:false
-/rappel supprimer identifiant:42
+/reminder create when:2h text:Vérifier les annonces
+/reminder create when:demain 18:00 text:Réunion du staff delivery:Salon actuel category:Réunion du staff
+/reminder create when:15/09/2027 20:00 text:Événement de guilde channel:#evenements recipients:@Alice @Bob category:Événement RP
+/reminder edit reminder_id:42 when:3h text:Nouvel horaire de réunion
+/reminder edit reminder_id:42 recipients:aucun mention:false
+/reminder delete reminder_id:42
 ```
 
-Choose `envoi:Message privé` for a private reminder, `envoi:Salon actuel` for the
-current server text channel, or a `salon` for another text channel. Selecting a
-channel implies channel delivery when `envoi` is omitted. The creator must
+Choose `delivery:Message privé` for a private reminder, `delivery:Salon actuel` for the
+current server text channel, or a `channel` for another text channel. Selecting a
+channel implies channel delivery when `delivery` is omitted. The creator must
 be able to view and send messages there; the bot additionally needs Embed Links.
 Threads and non-text channels are not supported. All management responses are
 ephemeral, and members can only list, edit, or delete their own reminders in the
 current server. A reminder being sent cannot be edited or deleted.
 
-`mention` controls the creator's mention (enabled by default). `destinataires`
+`mention` controls the creator's mention (enabled by default). `recipients`
 accepts up to ten additional member mentions or IDs separated by spaces or
 commas, for channel delivery only. Every selected member must be able to view
 the destination. Roles, `@everyone`, and unselected users are never pinged.
-Switching to DM clears additional recipients; use `destinataires:aucun` to clear
+Switching to DM clears additional recipients; use `recipients:aucun` to clear
 them explicitly (`none` remains accepted). Text is always free-form (1–1,000
 characters), with optional `Rappel personnalisé`, `Réunion du staff`, `Échéance`,
 `Événement HRP`, or `Événement RP` category labels. Stored category and delivery
@@ -136,7 +137,7 @@ online. Overdue reminders are delivered after a restart. The worker rechecks
 membership and destination permissions before sending, uses atomic claims to
 coordinate workers, and recovers interrupted claims after five minutes.
 Transient failures retry up to five times with backoff; permanent failures
-appear in `/rappel liste`, with an attempted DM notification to the creator.
+appear in `/reminder list`, with an attempted DM notification to the creator.
 Edit a failed reminder with a new future schedule to retry it. Sent and failed
 records are removed after 30 days. As with other Discord API sends, a crash
 after Discord accepts the message but before MySQL records success can cause

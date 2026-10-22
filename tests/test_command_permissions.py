@@ -13,9 +13,10 @@ def test_registered_command_permissions():
     registered = {command.name: command for command in bot.tree.get_commands()}
 
     assert len(registered) == 55
-    assert "rappel" in registered
+    assert "reminder" in registered
+    assert "rappel" not in registered
     assert "remind" not in registered
-    assert {command.name for command in registered["rappel"].commands} == {"creer", "liste", "modifier", "supprimer"}
+    assert {command.name for command in registered["reminder"].commands} == {"create", "list", "edit", "delete"}
     assert not ADMIN_COMMANDS - registered.keys()
 
     for name in ADMIN_COMMANDS:
