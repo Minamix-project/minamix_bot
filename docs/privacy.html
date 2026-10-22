@@ -8,17 +8,19 @@
 <body>
   <main>
     <h1>MinamixBot Privacy Policy</h1>
-    <p><strong>Last updated:</strong> September 7, 2026</p>
+    <p><strong>Last updated:</strong> October 22, 2026</p>
     <p>MinamixBot is operated by <strong>Ichiky</strong> ("we", "us"). For privacy questions, contact <a href="mailto:minamix@ichdev.mozmail.com">minamix@ichdev.mozmail.com</a>.</p>
 
     <h2>Data we process</h2>
     <p>To provide its features, MinamixBot may process Discord user, guild, channel and role IDs; usernames and display names; message content needed for message rewards and roleplay prefixes; economy balances and transactions; moderation warnings; AFK information; roleplay character names, prefixes and images; administrative audit records; and technical logs.</p>
+    <p>For reminders, we also store the creator's ID, destination channel, selected recipient IDs, reminder text, category, scheduled time, and delivery status. We use these details to deliver and manage reminders.</p>
 
     <h2>How we use data</h2>
     <p>We use this data to operate the bot, apply configured moderation and economy rules, display roleplay characters, prevent abuse, troubleshoot failures, maintain backups, and keep an audit trail of administrative actions. We do not sell personal data or use it for advertising.</p>
 
     <h2>Storage and retention</h2>
     <p>Application data is stored in a MySQL database hosted by our infrastructure provider. Database backups are retained for up to <strong>14 days</strong>. We keep data only while it is needed for the bot’s operation, security, legal obligations, or backup recovery.</p>
+    <p>Pending reminders remain stored until delivered or deleted. Sent and failed reminders are removed from the application database after 30 days while the bot is running. You can delete your pending or failed reminders with <code>/remind delete</code>. Delivered Discord messages and database backups follow their own retention rules.</p>
 
     <h2>Discord and service providers</h2>
     <p>The bot uses Discord’s API and services. Images uploaded for roleplay characters may be stored as Discord message attachments. Hosting and database providers may process data on our behalf and are limited to providing the service.</p>

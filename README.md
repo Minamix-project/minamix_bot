@@ -86,6 +86,57 @@ the bot at runtime.
 | `/back` | Clear your absence status |
 | `/absents` | List absent members — admin |
 | `/activity <user>` | View a member's activity — admin |
+| `/remind create <when> <text> [...]` | Schedule a reminder, delivered by DM by default |
+| `/remind list` | List your pending reminders and delivery failures in this server |
+| `/remind edit <reminder_id> [...]` | Update one of your pending or failed reminders |
+| `/remind delete <reminder_id>` | Delete one of your pending or failed reminders |
+
+### Reminders
+
+Use a duration (`2h`, `1d 30m`, `1w`), a date and time
+(`15/09/2027 20:00` or `2027-09-15 20:00`), `tomorrow 18:00`
+(`demain 18:00` also works), or a time such as `18:00` for today.
+Dates use **Europe/Brussels** unless you provide an IANA `timezone`, such as
+`UTC` or `America/Montreal`. Durations measure elapsed time. Past dates,
+invalid dates, ambiguous/nonexistent daylight-saving times, and schedules more
+than five years ahead are rejected. Discord displays confirmations in each
+reader's local timezone.
+
+```text
+/remind create when:2h text:Check announcements
+/remind create when:tomorrow 18:00 text:Staff meeting delivery:current category:staff_meeting
+/remind create when:15/09/2027 20:00 text:Guild event channel:#events recipients:@Alice @Bob category:rp_event
+/remind edit reminder_id:42 when:3h text:Updated meeting time
+/remind edit reminder_id:42 recipients:none mention:false
+/remind delete reminder_id:42
+```
+
+Choose `delivery:dm` for a private reminder, `delivery:current` for the current
+server text channel, or a `channel` for another text channel. Selecting a
+channel implies channel delivery when `delivery` is omitted. The creator must
+be able to view and send messages there; the bot additionally needs Embed Links.
+Threads and non-text channels are not supported. All management responses are
+ephemeral, and members can only list, edit, or delete their own reminders in the
+current server. A reminder being sent cannot be edited or deleted.
+
+`mention` controls the creator's mention (enabled by default). `recipients`
+accepts up to ten additional member mentions or IDs separated by spaces or
+commas, for channel delivery only. Every selected member must be able to view
+the destination. Roles, `@everyone`, and unselected users are never pinged.
+Switching to DM clears additional recipients; use `recipients:none` to clear
+them explicitly. Text is always free-form (1–1,000 characters), with optional
+`custom`, `staff_meeting`, `deadline`, `ooc_event`, or `rp_event` category labels.
+
+Reminders are stored in MySQL and checked every 15 seconds while the bot is
+online. Overdue reminders are delivered after a restart. The worker rechecks
+membership and destination permissions before sending, uses atomic claims to
+coordinate workers, and recovers interrupted claims after five minutes.
+Transient failures retry up to five times with backoff; permanent failures
+appear in `/remind list`, with an attempted DM notification to the creator.
+Edit a failed reminder with a new future schedule to retry it. Sent and failed
+records are removed after 30 days. As with other Discord API sends, a crash
+after Discord accepts the message but before MySQL records success can cause
+a duplicate on recovery. Recurring reminders are a future extension.
 
 ### Economy and shop
 
@@ -180,6 +231,17 @@ make stop      # stop application services
 
 CI automatically runs linting, compilation, and tests on pushes and pull
 requests.
+
+To run the optional reminder MySQL integration test, start a disposable
+MySQL 8 instance with the `reminder_test` database and empty root password,
+bound only to localhost, then run:
+
+```bash
+REMINDER_TEST_DB_PORT=3307 python3 -m pytest -q tests/test_reminder_storage.py
+```
+
+The test initializes the schema, replays startup, and modifies data only in
+`reminder_test`; it ignores the application's database configuration.
 
 ## Architecture
 

@@ -58,7 +58,9 @@ async def _main():
 
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.CheckFailure):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            message = f"Please wait {max(1, int(error.retry_after) + 1)} seconds before using this command again."
+        elif isinstance(error, app_commands.CheckFailure):
             message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
         else:
             command_name = interaction.command.name if interaction.command else "inconnue"
@@ -215,7 +217,10 @@ async def _main():
     except KeyboardInterrupt:
         await bot.close()
     finally:
+        # Close cogs (including reminder delivery) before returning the DB pool.
+        await bot.close()
         heartbeat.cancel()
+        check_backup_test_status.cancel()
         try:
             ready_file.unlink(missing_ok=True)
         except OSError:
