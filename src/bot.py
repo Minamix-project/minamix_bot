@@ -59,7 +59,7 @@ async def _main():
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
-            message = f"Please wait {max(1, int(error.retry_after) + 1)} seconds before using this command again."
+            message = f"Patiente encore {max(1, int(error.retry_after) + 1)} secondes avant de réutiliser cette commande."
         elif isinstance(error, app_commands.CheckFailure):
             message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
         else:

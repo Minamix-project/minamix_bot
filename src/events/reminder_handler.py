@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 
 from src.config import GUILD_IDS
 from src.utils.error_reporting import report_error
-from src.utils.reminder_delivery import send_reminder
+from src.utils.reminder_delivery import delivery_error_message, send_reminder
 from src.utils.reminders import (
     MAX_ATTEMPTS, claim_next_reminder, finish_reminder, purge_finished_reminders,
 )
@@ -20,16 +20,21 @@ logger = logging.getLogger(__name__)
 async def deliver_claimed_reminder(bot, reminder) -> None:
     try:
         if reminder.attempts > MAX_ATTEMPTS:
-            raise ValueError("Delivery was interrupted too many times. Edit this reminder to retry.")
+            raise ValueError(delivery_error_message("Delivery was interrupted too many times. Edit this reminder to retry."))
         async with asyncio.timeout(60):
             await send_reminder(bot, reminder)
     except (ValueError, discord.Forbidden, discord.NotFound) as exc:
-        detail = str(exc) if isinstance(exc, ValueError) else "Discord denied delivery or the destination was removed."
+        detail = delivery_error_message(
+            str(exc) if isinstance(exc, ValueError) else "Discord denied delivery or the destination was removed."
+        )
         await finish_reminder(reminder, int(time.time()), error=detail, permanent=True)
         await notify_failure(bot, reminder)
     except Exception as exc:
         # Do not persist raw API responses or reminder contents in error fields.
-        await finish_reminder(reminder, int(time.time()), error="Temporary delivery failure. Please try again later.")
+        await finish_reminder(
+            reminder, int(time.time()),
+            error=delivery_error_message("Temporary delivery failure. Please try again later."),
+        )
         await report_error(bot, guild_ids=reminder.guild_id, source=f"reminder:{reminder.id}", error=exc)
         if reminder.attempts >= MAX_ATTEMPTS:
             await notify_failure(bot, reminder)
@@ -41,8 +46,8 @@ async def notify_failure(bot, reminder) -> None:
     try:
         user = bot.get_user(reminder.user_id) or await bot.fetch_user(reminder.user_id)
         await user.send(
-            f"Reminder #{reminder.id} could not be delivered. "
-            "Use `/remind list` in the original server to see the reason, then edit or delete it.",
+            f"Le rappel #{reminder.id} n'a pas pu être envoyé. "
+            "Utilise `/rappel liste` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:
