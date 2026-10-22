@@ -5,8 +5,8 @@ import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DEFAULT_TIMEZONE = "Europe/Brussels"
-_DURATION = re.compile(r"(\d+)\s*([smhdw])", re.IGNORECASE)
-_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+_DURATION = re.compile(r"(\d+)\s*(sem|[smhjdw])", re.IGNORECASE)
+_SECONDS = {"s": 1, "m": 60, "h": 3600, "j": 86400, "sem": 604800, "d": 86400, "w": 604800}
 
 
 def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, now: datetime | None = None) -> int:
@@ -18,10 +18,10 @@ def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, no
     try:
         zone = ZoneInfo(timezone_name)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError("Unknown timezone. Use an IANA name such as Europe/Brussels or UTC.") from exc
+        raise ValueError("Fuseau horaire inconnu. Utilise un nom IANA comme Europe/Brussels ou UTC.") from exc
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
-        raise ValueError("The reference time must include a timezone.")
+        raise ValueError("L'heure de référence doit inclure un fuseau horaire.")
     raw = value.strip().lower()
     parts = list(_DURATION.finditer(raw))
     if parts and not _DURATION.sub("", raw).strip():
@@ -41,7 +41,7 @@ def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, no
                 pattern = "%d/%m/%Y %H:%M" if "/" in raw else "%Y-%m-%d %H:%M"
                 naive = datetime.strptime(raw, pattern)
         except (ValueError, OverflowError) as exc:
-            raise ValueError("Use 2h, 1d 30m, tomorrow 18:00, HH:MM, or DD/MM/YYYY HH:MM.") from exc
+            raise ValueError("Utilise 2h, 1j 30m, demain 18:00, HH:MM ou JJ/MM/AAAA HH:MM.") from exc
 
         candidates = set()
         for fold in (0, 1):
@@ -50,11 +50,11 @@ def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, no
             if utc.astimezone(zone).replace(tzinfo=None) == naive:
                 candidates.add(int(utc.timestamp()))
         if len(candidates) != 1:
-            raise ValueError("This local time is ambiguous or does not exist due to daylight saving. Use UTC.")
+            raise ValueError("Cette heure est ambiguë ou inexistante à cause du changement d'heure. Utilise UTC.")
         timestamp = candidates.pop()
 
     if timestamp <= now.timestamp():
-        raise ValueError("The reminder must be in the future. A time without a date means today.")
+        raise ValueError("Le rappel doit être dans le futur. Une heure sans date correspond à aujourd'hui.")
     if timestamp > int(now.timestamp()) + 5 * 366 * 86400:
-        raise ValueError("Reminders can be scheduled up to five years ahead.")
+        raise ValueError("Les rappels peuvent être programmés au maximum cinq ans à l'avance.")
     return timestamp

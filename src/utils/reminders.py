@@ -11,11 +11,11 @@ from src.utils.db import get_db_connection
 MAX_ATTEMPTS = 5
 LEASE_SECONDS = 300
 CATEGORIES = {
-    "custom": "Reminder",
-    "staff_meeting": "Staff meeting",
-    "deadline": "Deadline",
-    "ooc_event": "OOC event",
-    "rp_event": "RP event",
+    "custom": "Rappel personnalisé",
+    "staff_meeting": "Réunion du staff",
+    "deadline": "Échéance",
+    "ooc_event": "Événement HRP",
+    "rp_event": "Événement RP",
 }
 
 
@@ -46,14 +46,14 @@ def _from_row(row) -> Reminder:
 def validate_reminder(reminder: Reminder) -> Reminder:
     message = reminder.message.strip()
     if not message or len(message) > 1000:
-        raise ValueError("Reminder text must contain between 1 and 1,000 characters.")
+        raise ValueError("Le texte du rappel doit contenir entre 1 et 1 000 caractères.")
     if reminder.category not in CATEGORIES:
-        raise ValueError("Unknown reminder category.")
+        raise ValueError("Catégorie de rappel inconnue.")
     recipients = tuple(dict.fromkeys(reminder.recipient_ids))
     if len(recipients) > 10:
-        raise ValueError("Select at most 10 additional members.")
+        raise ValueError("Sélectionne au maximum 10 membres supplémentaires.")
     if reminder.channel_id is None and recipients:
-        raise ValueError("Additional mentions require channel delivery. DMs are sent only to you.")
+        raise ValueError("Les mentions supplémentaires nécessitent un envoi dans un salon. Les MP te sont réservés.")
     return replace(reminder, message=message, recipient_ids=recipients)
 
 

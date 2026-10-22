@@ -35,7 +35,7 @@ def setup_destination():
     return bot, guild, owner, guest, channel
 
 
-@pytest.mark.parametrize("value,expected", [("<@2> <@!4>,2", (2, 4)), ("none", ()), ("2 4", (2, 4))])
+@pytest.mark.parametrize("value,expected", [("<@2> <@!4>,2", (2, 4)), ("aucun", ()), ("none", ()), ("2 4", (2, 4))])
 def test_recipient_selection(value, expected):
     assert delivery.parse_recipients(value) == expected
 
@@ -51,7 +51,7 @@ def test_text_validation_and_dm_recipients():
     for text in (" ", "x" * 1001):
         with pytest.raises(ValueError):
             validate_reminder(reminder(message=text))
-    with pytest.raises(ValueError, match="channel delivery"):
+    with pytest.raises(ValueError, match="envoi dans un salon"):
         validate_reminder(reminder(channel_id=None, recipient_ids=(4,)))
 
 
@@ -61,6 +61,9 @@ def test_channel_delivery_only_allows_explicit_user_mentions():
     kwargs = channel.send.await_args.kwargs
     assert kwargs["content"] == "<@2> <@4>"
     assert kwargs["embed"].description == "Check @everyone <@&9> <@99>"
+    assert kwargs["embed"].title == "⏰ Rappel personnalisé"
+    assert kwargs["embed"].fields[0].name == "Prévu pour le"
+    assert kwargs["embed"].footer.text == "Rappel #1 · Créé par Creator"
     mentions = kwargs["allowed_mentions"].to_dict()
     assert mentions["users"] == [2, 4]
     assert mentions["parse"] == []
@@ -90,7 +93,7 @@ def test_removed_owner_prevents_delivery():
     bot, guild, _owner, _guest, channel = setup_destination()
     guild.get_member.return_value = None
     guild.get_member.side_effect = None
-    with pytest.raises(ValueError, match="owner"):
+    with pytest.raises(ValueError, match="créateur"):
         asyncio.run(delivery.send_reminder(bot, reminder()))
     channel.send.assert_not_awaited()
 
