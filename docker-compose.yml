@@ -1,6 +1,20 @@
+name: minamix_bot
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: mysql:8.4.8
+    mem_limit: 640m
+    memswap_limit: 640m
+    cpus: 0.75
+    cpu_shares: 256
+    logging: *logging
+    command: ["--innodb-buffer-pool-size=128M", "--max-connections=40", "--performance-schema=OFF"]
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -16,13 +30,21 @@ services:
       retries: 10
 
   bot:
+    image: minamix_bot-bot:latest
     build: .
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    cpu_shares: 256
+    pids_limit: 128
+    logging: *logging
     restart: unless-stopped
     env_file: .env
     environment:
       BOT_VERSION: ${BOT_VERSION:-dev}
       GIT_COMMIT: ${GIT_COMMIT:-unknown}
       DEPLOY_NOTIFICATION: ${DEPLOY_NOTIFICATION:-0}
+      DB_POOL_MAX_SIZE: "5"
     volumes:
       - ./backups:/app/backups:ro
       - ./backup_test_status:/app/backup_test_status:ro
@@ -39,6 +61,11 @@ services:
 
   backup:
     image: mysql:8.4.8
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.25
+    cpu_shares: 128
+    logging: *logging
     restart: unless-stopped
     environment:
       DB_NAME: ${DB_NAME}
@@ -73,7 +100,11 @@ services:
 
   backup-test-db:
     image: mysql:8.4.8
-    restart: unless-stopped
+    profiles: [restore-test]
+    restart: "no"
+    mem_limit: 512m
+    cpus: 0.5
+    logging: *logging
     environment:
       MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:?BACKUP_TEST_ROOT_PASSWORD must be set}
     tmpfs:
@@ -86,7 +117,11 @@ services:
 
   backup-test:
     image: mysql:8.4.8
-    restart: unless-stopped
+    profiles: [restore-test]
+    restart: "no"
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *logging
     environment:
       DB_NAME: ${DB_NAME}
       MYSQL_ROOT_PASSWORD: ${BACKUP_TEST_ROOT_PASSWORD:?BACKUP_TEST_ROOT_PASSWORD must be set}
