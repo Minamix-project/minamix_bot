@@ -26,6 +26,8 @@ async def register(bot):
             description=(
                 f"Les logs seront envoyés dans {channel.mention}, y compris les modifications "
                 "et suppressions de messages avec leur contenu disponible.\n"
+                "Le suivi conserve les versions de façon chiffrée, avec une durée et des limites "
+                "consultables dans `/messagehistory status`. Réservez ce salon à la modération.\n"
                 "Le bot doit pouvoir voir ce salon, y envoyer des messages, intégrer des liens "
                 "et joindre des fichiers pour les contenus longs et les suppressions groupées."
             ),

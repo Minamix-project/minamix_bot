@@ -27,6 +27,7 @@ Thumbs.db
 # Logs
 *.log
 backups/
+history-keys/
 backup_test_status/
 .pytest_cache/
 .ruff_cache/

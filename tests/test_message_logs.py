@@ -196,8 +196,8 @@ def test_bulk_deletion_sends_one_summary_with_cached_and_uncached_records(monkey
     channel.send.assert_awaited_once()
     embed, transcript = captured[0]
     assert fields(embed)["Messages supprimés"] == "2"
-    assert fields(embed)["Contenus en cache"] == "1"
-    assert fields(embed)["Messages hors cache"] == "1"
+    assert fields(embed)["Contenus disponibles"] == "1"
+    assert fields(embed)["Contenus indisponibles"] == "1"
     assert "Bulk deleted text" in transcript
     assert UNAVAILABLE in transcript
     assert str(MESSAGE_ID + 2) in transcript

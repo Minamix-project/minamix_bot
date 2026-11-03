@@ -6,7 +6,7 @@ from io import BytesIO
 import discord
 
 
-UNAVAILABLE = "Indisponible : message absent du cache du bot."
+UNAVAILABLE = "Indisponible : aucune copie conservée dans le cache ou l'historique."
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class MessageSnapshot:
 
     def author_text(self) -> str:
         if self.author_id is None:
-            return "Auteur inconnu : message absent du cache du bot."
+            return "Auteur inconnu : aucune copie disponible."
         name = discord.utils.escape_markdown(self.author_name or "Utilisateur inconnu")
         return f"{name} · <@{self.author_id}> (`{self.author_id}`)"
 
@@ -127,8 +127,8 @@ def build_bulk_log(guild_id: int, channel_id: int, message_ids: set[int],
                    snapshots: dict[int, MessageSnapshot]):
     embed = base_embed("🗑️ Suppression groupée de messages", discord.Color.red(), channel_id)
     embed.add_field(name="Messages supprimés", value=str(len(message_ids)))
-    embed.add_field(name="Contenus en cache", value=str(len(snapshots)))
-    embed.add_field(name="Messages hors cache", value=str(len(message_ids) - len(snapshots)))
+    embed.add_field(name="Contenus disponibles", value=str(len(snapshots)))
+    embed.add_field(name="Contenus indisponibles", value=str(len(message_ids) - len(snapshots)))
     embed.description = "Le fichier joint contient les identifiants et tous les contenus disponibles."
     records = [
         f"Serveur : {guild_id}\nSalon : {channel_id}\nDate du journal : {embed.timestamp.isoformat()}\n"

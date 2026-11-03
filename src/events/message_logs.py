@@ -7,9 +7,20 @@ import discord
 from src.config import GUILD_IDS
 from src.utils.db import get_db_connection
 from src.utils.message_logs import MessageSnapshot, build_bulk_log, build_message_log
+from src.utils.message_history import HistoryResult, same_content
 
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_history(bot, guild_id, channel_id, message_id, kind, before, *, update=None):
+    cog = bot.get_cog("MessageHistory")
+    if cog is not None:
+        try:
+            return await cog.store.record(guild_id, channel_id, message_id, kind, before, update=update)
+        except Exception as exc:
+            logger.error("Message history update failed guild=%s type=%s", guild_id, type(exc).__name__)
+    return HistoryResult(before, MessageSnapshot.from_update(update, before) if update is not None else None)
 
 
 async def get_logs_channel(bot, guild_id: int):
@@ -67,6 +78,8 @@ async def register(bot):
         before = MessageSnapshot.from_message(payload.cached_message) if payload.cached_message else MessageSnapshot()
         if is_own_message(before):
             return
+        result = await resolve_history(bot, payload.guild_id, payload.channel_id, payload.message_id, "deleted", before)
+        before = result.before
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
             await send_log(channel, *build_message_log(
@@ -84,7 +97,13 @@ async def register(bot):
         after = MessageSnapshot.from_update(payload.data, before)
         if is_own_message(after):
             return
-        if before.content == after.content and before.attachments == after.attachments:
+        if payload.cached_message is not None and same_content(before, after):
+            return
+        result = await resolve_history(
+            bot, payload.guild_id, payload.channel_id, payload.message_id, "edited", before, update=payload.data,
+        )
+        before, after = result.before, result.after
+        if same_content(before, after):
             return
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
@@ -105,6 +124,13 @@ async def register(bot):
         if not message_ids:
             return
         snapshots = {message_id: snapshot for message_id, snapshot in snapshots.items() if message_id in message_ids}
+        for message_id in sorted(message_ids):
+            result = await resolve_history(
+                bot, payload.guild_id, payload.channel_id, message_id, "deleted",
+                snapshots.get(message_id, MessageSnapshot()),
+            )
+            if result.before.content is not None or result.before.attachments is not None:
+                snapshots[message_id] = result.before
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
             await send_log(
