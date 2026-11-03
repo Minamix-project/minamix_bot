@@ -195,6 +195,28 @@ Anti-spam logs message deletion and ban results separately. Technical failures
 receive a short reference and can be sent to the channel configured with
 `/seterrorlogs`.
 
+The general log channel configured with `/setlogs` also receives message edits,
+single deletions, and bulk deletions from allowed guilds, including threads.
+Records show the message author (not an inferred deleting moderator), source
+channel, message ID, creation time, event time, available content, and attachment
+names and URLs. Edits show before/after versions and a link to the message.
+Attachment-only changes are recorded; link previews and pin updates are ignored.
+Long records include a UTF-8 text file with the unabridged content. Bulk deletions
+produce one summary and a text transcript. The bot needs View Channel, Send
+Messages, Embed Links, and Attach Files in the destination. If attaching a file is
+forbidden, the bot sends the summary with an explicit notice instead. Mentions in
+logs never ping users or roles. The bot's own cached messages are excluded to
+avoid logging its own log deletions.
+
+Previous content and deleted attachments are available only while messages are
+in discord.py's in-memory cache (the latest 1,000 messages by default, across the
+bot). Older messages and messages predating a restart are still reported, but
+missing authors/content are explicitly marked unavailable. Updates use the
+Gateway event's new content, without fetching a potentially newer version.
+Message bodies are not persisted in MySQL by this feature. Attachment URLs may
+expire; attachment binaries are not downloaded or reuploaded. Log messages and
+transcripts remain in Discord until removed by server administrators.
+
 ### Roleplay
 
 | Command | Description |
