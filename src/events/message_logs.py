@@ -34,7 +34,8 @@ async def get_logs_channel(bot, guild_id: int):
     return guild.get_channel(channel_id) if guild else None
 
 
-async def send_log(channel, embed: discord.Embed, file: discord.File | None):
+async def send_log(channel, embed: discord.Embed, file: discord.File | None, *, bot_user: discord.ClientUser):
+    embed.set_footer(text=str(bot_user), icon_url=bot_user.display_avatar.url)
     kwargs = {"embed": embed, "allowed_mentions": discord.AllowedMentions.none()}
     try:
         if file is not None:
@@ -70,7 +71,7 @@ async def register(bot):
         if channel is not None:
             await send_log(channel, *build_message_log(
                 payload.guild_id, payload.channel_id, payload.message_id, before,
-            ))
+            ), bot_user=bot.user)
 
     @bot.listen("on_raw_message_edit")
     async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
@@ -89,7 +90,7 @@ async def register(bot):
         if channel is not None:
             await send_log(channel, *build_message_log(
                 payload.guild_id, payload.channel_id, payload.message_id, before, after,
-            ))
+            ), bot_user=bot.user)
 
     @bot.listen("on_raw_bulk_message_delete")
     async def on_raw_bulk_message_delete(payload: discord.RawBulkMessageDeleteEvent):
@@ -106,4 +107,7 @@ async def register(bot):
         snapshots = {message_id: snapshot for message_id, snapshot in snapshots.items() if message_id in message_ids}
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
-            await send_log(channel, *build_bulk_log(payload.guild_id, payload.channel_id, message_ids, snapshots))
+            await send_log(
+                channel, *build_bulk_log(payload.guild_id, payload.channel_id, message_ids, snapshots),
+                bot_user=bot.user,
+            )

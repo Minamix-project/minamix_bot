@@ -65,11 +65,10 @@ def text_file(text: str, filename: str) -> discord.File:
     return discord.File(BytesIO(text.encode("utf-8")), filename=filename)
 
 
-def base_embed(title: str, color: discord.Color, guild_id: int, channel_id: int,
+def base_embed(title: str, color: discord.Color, channel_id: int,
                message_id: int | None = None) -> discord.Embed:
     embed = discord.Embed(title=title, color=color, timestamp=discord.utils.utcnow())
     embed.add_field(name="Salon", value=f"<#{channel_id}> (`{channel_id}`)", inline=False)
-    embed.set_footer(text=f"Serveur : {guild_id} · Date du journal")
     if message_id is not None:
         embed.add_field(name="Identifiant du message", value=str(message_id))
         created_at = int(discord.utils.snowflake_time(message_id).timestamp())
@@ -83,7 +82,7 @@ def build_message_log(guild_id: int, channel_id: int, message_id: int,
     embed = base_embed(
         "✏️ Message modifié" if edited else "🗑️ Message supprimé",
         discord.Color.orange() if edited else discord.Color.red(),
-        guild_id, channel_id, message_id,
+        channel_id, message_id,
     )
     embed.add_field(name="Auteur du message", value=(after or before).author_text(), inline=False)
     if edited:
@@ -126,7 +125,7 @@ def build_message_log(guild_id: int, channel_id: int, message_id: int,
 
 def build_bulk_log(guild_id: int, channel_id: int, message_ids: set[int],
                    snapshots: dict[int, MessageSnapshot]):
-    embed = base_embed("🗑️ Suppression groupée de messages", discord.Color.red(), guild_id, channel_id)
+    embed = base_embed("🗑️ Suppression groupée de messages", discord.Color.red(), channel_id)
     embed.add_field(name="Messages supprimés", value=str(len(message_ids)))
     embed.add_field(name="Contenus en cache", value=str(len(snapshots)))
     embed.add_field(name="Messages hors cache", value=str(len(message_ids) - len(snapshots)))

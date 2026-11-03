@@ -13,6 +13,9 @@ from src.utils.message_logs import MessageSnapshot, UNAVAILABLE, build_bulk_log,
 GUILD_ID = 123
 CHANNEL_ID = 456
 MESSAGE_ID = 1300000000000000000
+BOT_USER = discord.ClientUser(state=None, data={
+    "id": "99", "username": "MinamixBot", "discriminator": "0", "avatar": "test-avatar",
+})
 
 
 def message(content="Original text", *, author_id=42, attachments=(), message_id=MESSAGE_ID):
@@ -28,7 +31,7 @@ def fields(embed):
 
 def setup_listeners(monkeypatch):
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.default())
-    bot._connection.user = SimpleNamespace(id=99)
+    bot._connection.user = BOT_USER
     channel = SimpleNamespace(id=789, send=AsyncMock())
     lookup = AsyncMock(return_value=channel)
     monkeypatch.setattr(handler, "GUILD_IDS", {GUILD_ID})
@@ -72,6 +75,8 @@ def test_cached_deletion_has_content_author_identifiers_and_no_pings(monkeypatch
     assert values["Identifiant du message"] == str(MESSAGE_ID)
     assert "Message envoyé le" in values
     assert embed.timestamp is not None
+    assert embed.footer.text == "MinamixBot"
+    assert embed.footer.icon_url == BOT_USER.display_avatar.url
     assert kwargs["allowed_mentions"].to_dict() == {"parse": []}
 
 
@@ -215,7 +220,7 @@ def test_missing_attach_permission_falls_back_to_explicit_summary():
     channel = SimpleNamespace(id=789, send=AsyncMock(side_effect=[
         discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Missing Permissions"), None,
     ]))
-    asyncio.run(handler.send_log(channel, embed, file))
+    asyncio.run(handler.send_log(channel, embed, file, bot_user=BOT_USER))
     assert channel.send.await_count == 2
     assert "file" not in channel.send.await_args.kwargs
     assert "Fichier intégral non envoyé" in embed.description
@@ -227,7 +232,7 @@ def test_discord_send_failure_is_logged_without_message_content(caplog):
         SimpleNamespace(status=403, reason="Forbidden"), "Missing Permissions",
     )))
     embed, file = build_message_log(GUILD_ID, CHANNEL_ID, MESSAGE_ID, MessageSnapshot(42, "Alice", "Private content", ()))
-    asyncio.run(handler.send_log(channel, embed, file))
+    asyncio.run(handler.send_log(channel, embed, file, bot_user=BOT_USER))
     assert "Message log delivery failed channel=789" in caplog.text
     assert "Private content" not in caplog.text
 
