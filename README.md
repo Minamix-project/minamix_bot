@@ -294,6 +294,21 @@ remain until removed by administrators; the database cleaner does not remove the
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |
 
+Dice rolls support 200 base dice per group, up to 20 repeated sets and four
+semicolon-separated expressions. A shared budget of 10,000 actual random draws
+per command includes every reroll and explosion, across all groups, sets, and
+aliases. Exceeding that budget returns an explicit error instead of a partial
+result. Fate, Warhammer, Godbound, and Wrath & Glory use the same group limit.
+Expressions are limited to 1,000 characters, numeric literals to nine digits,
+and dice to 1,000,000 sides. Excess sets and expressions are rejected explicitly.
+
+When full results exceed the embed description limit, `/roll` sends a compact
+summary and one UTF-8 text attachment containing the exact original results;
+creating the summary never rerolls the dice. Private rolls keep both the summary
+and attachment ephemeral. Short rolls remain a single embed. Each member can
+invoke `/roll` five times per ten seconds per guild. `/roll help` describes the
+roll limits and long-output behavior in French.
+
 ## Backups
 
 The `backup` service creates periodic SQL dumps and removes files older than
