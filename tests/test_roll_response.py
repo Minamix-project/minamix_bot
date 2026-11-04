@@ -32,7 +32,8 @@ def test_small_output_is_kept_without_attachment():
 
 
 @pytest.mark.parametrize("private", [False, True])
-def test_large_series_delivers_totals_and_exact_file_without_rerolling(monkeypatch, private):
+@pytest.mark.parametrize("suffix,total", [("", 4000), (" k1", 20)])
+def test_large_series_delivers_totals_and_exact_file_without_rerolling(monkeypatch, private, suffix, total):
     draw = Mock(return_value=20)
     monkeypatch.setattr(dice, "_d", draw)
     current = interaction()
@@ -42,7 +43,7 @@ def test_large_series_delivers_totals_and_exact_file_without_rerolling(monkeypat
         captured.append((kwargs, kwargs["file"].fp.read().decode("utf-8")))
 
     current.followup.send.side_effect = capture
-    expression = ("p " if private else "") + "20 200d20"
+    expression = ("p " if private else "") + "20 200d20" + suffix
     asyncio.run(registered_command().callback(current, expression))
     assert draw.call_count == 4000
     assert current.response.defer.await_args.kwargs == {"ephemeral": private, "thinking": True}
@@ -51,8 +52,8 @@ def test_large_series_delivers_totals_and_exact_file_without_rerolling(monkeypat
     embed = kwargs["embed"]
     assert len(embed.description) <= 4096
     assert len(embed) <= 6000
-    assert embed.description.count("**4000**") == 20
-    assert transcript.count("**4000**") == 20
+    assert embed.description.count(f"**{total}**") == 20
+    assert transcript.count(f"**{total}**") == 20
     assert transcript.count("20 ") > 3000
     assert kwargs["ephemeral"] is private
     assert kwargs["allowed_mentions"].to_dict() == {"parse": []}
@@ -70,10 +71,37 @@ def test_normal_roll_stays_one_short_response(monkeypatch):
     assert "file" not in kwargs
 
 
-def test_budget_exhaustion_is_a_private_explanation(monkeypatch):
-    monkeypatch.setattr(dice, "_d", lambda _sides: 1)
+@pytest.mark.parametrize("expression", ["1d1 blabla", "1d1/0", "1d1 ir1", "1d1 ie1"])
+def test_invalid_rolls_have_clear_private_feedback(monkeypatch, expression):
+    draw = Mock()
+    monkeypatch.setattr(dice, "_d", draw)
     current = interaction()
-    asyncio.run(registered_command().callback(current, "200d1 ie1"))
+    asyncio.run(registered_command().callback(current, expression))
+    kwargs = current.response.send_message.await_args.kwargs
+    assert "❌" in kwargs["embed"].description
+    assert kwargs["ephemeral"]
+    current.followup.send.assert_not_awaited()
+    draw.assert_not_called()
+
+
+def test_chain_limit_failure_is_private_and_does_not_deliver_partial_results(monkeypatch):
+    monkeypatch.setattr(dice, "EXPLODE_CAP", 2)
+    monkeypatch.setattr(dice, "_d", lambda _sides: 6)
+    current = interaction()
+    asyncio.run(registered_command().callback(current, "1d6 ie6"))
+    assert "Jet annulé" in current.response.send_message.await_args.args[0]
+    assert current.response.send_message.await_args.kwargs["ephemeral"]
+    current.followup.send.assert_not_awaited()
+
+
+def test_help_fits_a_single_embed_description():
+    assert len(dice.get_help().encode("utf-16-le")) // 2 <= 4096
+
+
+def test_budget_exhaustion_is_a_private_explanation(monkeypatch):
+    current = interaction()
+    monkeypatch.setattr(dice, "_d", lambda _sides: 2)
+    asyncio.run(registered_command().callback(current, "200d2 ie2"))
     assert "tirages par commande" in current.response.send_message.await_args.args[0]
     assert current.response.send_message.await_args.kwargs["ephemeral"]
     current.followup.send.assert_not_awaited()

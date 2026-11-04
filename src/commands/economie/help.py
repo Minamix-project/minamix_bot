@@ -3,6 +3,7 @@ from discord import Interaction
 from discord.ui import Select
 
 from src.utils.embed import set_bot_footer
+from src.utils.dice import get_help as get_dice_help
 from src.utils.permissions import is_admin
 
 
@@ -25,7 +26,6 @@ _ECONOMY = (
 )
 
 _RP_PUBLIC = (
-    "`/roll <expression>` — Lancer des dés (`/roll help` pour les exemples)\n"
     "`/rplist [user]` — Lister des personnages avec navigation\n"
     "`/rpbourse [user]` — Consulter la bourse Nax d'un personnage"
 )
@@ -121,6 +121,7 @@ async def register(bot):
         options = [
             discord.SelectOption(label="Pour commencer", value="general", emoji="👋"),
             discord.SelectOption(label="Économie", value="economy", emoji="💰"),
+            discord.SelectOption(label="Dés", value="dice", emoji="🎲"),
             discord.SelectOption(label="Roleplay", value="rp", emoji="🎭"),
         ]
         if admin:
@@ -139,6 +140,7 @@ async def register(bot):
         pages = {
             "general": ("👋 Pour commencer", _GENERAL, discord.Color.blurple()),
             "economy": ("💰 Économie", _ECONOMY, discord.Color.gold()),
+            "dice": ("🎲 Aide — Lancers de dés", get_dice_help(), discord.Color.blurple()),
             "rp": ("🎭 Roleplay", _RP_PUBLIC, discord.Color.purple()),
             "rp_management": ("📝 Gestion RP", _RP_MANAGEMENT, discord.Color.purple()),
             "admin_economy": ("🔒 Administration · Économie", _ADMIN_ECONOMY, discord.Color.red()),
