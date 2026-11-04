@@ -271,3 +271,100 @@ def test_zero_divisor_from_dice_is_an_explicit_error(monkeypatch):
     assert "Division par zéro" in result
     assert "annulé" in result
     assert private
+
+
+@pytest.mark.parametrize("expression,expected,draws", [
+    ("4df s", "+4", 4), ("4df nr", "+4", 4), ("4df+1 s", "+5", 4),
+    ("ed7+2", "14", 1), ("(ed18+2)*3", "81", 3), ("ed15*2+1", "53", 4),
+    ("attack+5+2", "27", 1), ("sr3+1", "4", 3),
+    ("age s", "18", 3), ("gb 3 s", "8", 3), ("wng 6 nr", "7", 6),
+    ("3wh45 nr", "0", 3), ("+d20 s", "20", 2), ("-d20 nr", "20", 2),
+])
+def test_alias_flags_and_scalar_arithmetic_work_without_rerolling(monkeypatch, expression, expected, draws):
+    draw = Mock(side_effect=lambda sides: sides)
+    monkeypatch.setattr(dice, "_d", draw)
+    output, _private = roll(expression)
+    assert "❌" not in output
+    assert f"**{expected}**" in output
+    assert draw.call_count == draws
+    if expression.endswith((" s", " nr")):
+        assert "`[" not in output
+
+
+@pytest.mark.parametrize("expression,total,draws", [
+    ("2 4df", "+4", 8), ("2 4df+1 s", "+5", 8), ("2 ed7+2", "14", 2),
+    ("2 age s", "18", 6), ("2 wng 6 nr", "7", 12), ("2 gb 3 s", "8", 6),
+    ("2 3wh45", "0", 6), ("2 dndstats s", "18", 48),
+])
+def test_series_repeat_aliases_with_shared_options(monkeypatch, expression, total, draws):
+    draw = Mock(side_effect=lambda sides: sides)
+    monkeypatch.setattr(dice, "_d", draw)
+    output, _private = roll(expression)
+    assert "❌" not in output
+    assert output.count("`#") == 2
+    assert output.count(f"**{total}**") == (12 if "dndstats" in expression else 2)
+    assert draw.call_count == draws
+
+
+@pytest.mark.parametrize("expression", ["1d6 k999", "1d6 kl999", "1d6 d999", "1d6 d1", "4df k999", "4df d4"])
+def test_excessive_selections_fail_before_drawing(monkeypatch, expression):
+    draw = Mock()
+    monkeypatch.setattr(dice, "_d", draw)
+    output, private = roll(expression)
+    assert "❌ Impossible" in output
+    assert private
+    draw.assert_not_called()
+
+
+def test_selection_after_explosions_checks_the_actual_pool_size(monkeypatch):
+    draw = Mock(side_effect=[2, 6, 3])
+    monkeypatch.setattr(dice, "_d", draw)
+    output, private = roll("1d6 e6 k2")
+    assert "ne contient que 1" in output
+    assert private
+    output, _private = roll("1d6 e6 k2")
+    assert "❌" not in output
+    assert "**9**" in output
+    assert draw.call_count == 3
+
+
+@pytest.mark.parametrize("expression", ["2 3 4df", "2 3 age", "21 4df", "2 wng 0", "2 201df"])
+def test_invalid_alias_series_are_rejected_without_draws(monkeypatch, expression):
+    draw = Mock()
+    monkeypatch.setattr(dice, "_d", draw)
+    output, private = roll(expression)
+    assert "❌" in output
+    assert private
+    draw.assert_not_called()
+
+
+def test_alias_series_share_the_global_random_draw_limit(monkeypatch):
+    draw = Mock(return_value=2)
+    monkeypatch.setattr(dice, "_d", draw)
+    with pytest.raises(RollLimitError):
+        roll("20 200df;20 200df;20 200df")
+    assert draw.call_count == MAX_TOTAL_DRAWS
+
+
+def test_fate_keeps_signed_values_when_selecting_dice(monkeypatch):
+    monkeypatch.setattr(dice, "_d", Mock(side_effect=[1, 2, 3, 3]))
+    output, _private = roll("4df k3")
+    assert "**+2**" in output
+    assert "`[+ + □]`" in output
+    assert "Écartés" in output
+
+
+def test_unsorted_special_alias_preserves_draw_order(monkeypatch):
+    monkeypatch.setattr(dice, "_d", Mock(side_effect=[2, 5, 1]))
+    output, _private = roll("gb 3 ul")
+    assert "`[2 5 1]`" in output
+
+
+@pytest.mark.parametrize("expression", ["4df r1", "4df e2", "4df t1", "4df ie1", "4df ir3"])
+def test_unsupported_fate_rules_are_explained_before_drawing(monkeypatch, expression):
+    draw = Mock()
+    monkeypatch.setattr(dice, "_d", draw)
+    output, private = roll(expression)
+    assert "dés Fate acceptent" in output
+    assert private
+    draw.assert_not_called()

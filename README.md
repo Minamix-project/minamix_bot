@@ -307,9 +307,17 @@ conflicting modifiers, and division by zero return clear errors. Use `! text`
 for comments. Arithmetic supports chained `+ - * /`, parentheses, unary signs,
 and normal multiplication/division precedence. Calculations remain exact:
 terminating fractions are displayed as decimals when short, otherwise as exact
-fractions. Series repeat the complete expression, so `2 1d1+1d20` rolls two
+fractions. Series repeat the complete expression or alias, so `2 1d1+1d20` rolls two
 independent pairs of dice. Success-counting pools cannot be mixed with raw
 dice sums in one calculation; use separate semicolon-delimited rolls instead.
+Fate participates in exact arithmetic and keep/drop selection. Numeric aliases
+such as `ed7`, `sr3`, and `attack+5` can appear inside arithmetic expressions.
+Examples include `ed7+2`, `(ed18+2)*3`, and `4df+1`. Display options apply to all
+game aliases, including `4df s` and `age nr`; series also support `2 4df` and
+`2 age s`. Repeats cannot be nested, and all draws share the command budget.
+Impossible keep/drop counts are rejected before rolling when the pool size is
+known, or checked against the actual pool after explosions. At least one die
+must remain after a drop operation.
 
 Infinite reroll/explosion conditions that cannot terminate are rejected before
 any draw. Reaching a chain cap cancels the command with an explicit explanation
@@ -325,6 +333,8 @@ creating the summary never rerolls the dice. Private rolls keep both the summary
 and attachment ephemeral. Short rolls remain a single embed. Each member can
 invoke `/roll` five times per ten seconds per guild. `/roll help` describes the
 roll limits and long-output behavior in French.
+The public `/help` dropdown has a dedicated **Dés** category showing the same
+page as `/roll help`; `/roll` is no longer listed under Roleplay.
 
 ## Backups
 

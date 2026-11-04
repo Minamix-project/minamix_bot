@@ -2,9 +2,10 @@ import random
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import partial
 from typing import Optional
 
-from src.utils.dice_expression import ParseError, RollLimitError, parse_expression
+from src.utils.dice_expression import ParseError, RollLimitError, extract_flags, parse_expression
 
 MAX_DICE = 200
 MAX_TOTAL_DRAWS = 10000
@@ -134,8 +135,9 @@ def _expand_alias(expr: str) -> Optional[str]:
     return expr  # no alias matched, return as-is
 
 
-def _parse_math(expression: str):
-    return parse_expression(expression, max_dice=MAX_DICE, max_sides=MAX_SIDES)
+def _parse_math(expression: str, flags: set[str] | None = None):
+    return parse_expression(expression, max_dice=MAX_DICE, max_sides=MAX_SIDES,
+                            alias_expander=_expand_alias, flags=flags)
 
 
 def _render_math(parsed) -> str:
@@ -144,25 +146,17 @@ def _render_math(parsed) -> str:
 
 # ─── Special handlers ─────────────────────────────────────────────────────────
 
-def _roll_dndstats() -> str:
+def _roll_dndstats(*, unsorted: bool = False) -> str:
     sets = []
     for _ in range(6):
         rolls = [_draw(6) for _ in range(4)]
-        kept = sorted(rolls, reverse=True)[:3]
+        dropped_index = min(range(4), key=lambda index: rolls[index])
+        kept = [value for index, value in enumerate(rolls) if index != dropped_index]
         total = sum(kept)
         dropped = min(rolls)
-        sets.append(f"`[{' '.join(str(r) for r in sorted(rolls, reverse=True)[:3])} ~~{dropped}~~]` → **{total}**")
+        display = kept if unsorted else sorted(kept, reverse=True)
+        sets.append(f"`[{' '.join(str(r) for r in display)} ~~{dropped}~~]` → **{total}**")
     return "🎲 DnD Stats (4d6 drop lowest × 6)\n" + "\n".join(sets)
-
-
-def _roll_fate(n: int) -> str:
-    _validate_count(n)
-    symbols = {-1: "**-**", 0: "**□**", 1: "**+**"}
-    rolls = [_draw(3) - 2 for _ in range(n)]
-    total = sum(rolls)
-    display = " ".join(symbols[r] for r in rolls)
-    sign = "+" if total >= 0 else ""
-    return f"🎲 {n}dF `[{display}]` → **{sign}{total}**"
 
 
 def _roll_age() -> str:
@@ -212,7 +206,7 @@ def _roll_dh(args: str) -> str:
     return result
 
 
-def _roll_gb(args: str) -> str:
+def _roll_gb(args: str, *, unsorted: bool = False) -> str:
     m = re.fullmatch(r'(\d+)', args.strip())
     if args.strip() and not m:
         raise ParseError("Usage : `gb <dés>` — ex: `gb 3`")
@@ -231,7 +225,7 @@ def _roll_gb(args: str) -> str:
         dmg = 6
     else:
         dmg = 8
-    kept_str = " ".join(str(r) for r in sorted(rolls, reverse=True))
+    kept_str = " ".join(str(r) for r in (rolls if unsorted else sorted(rolls, reverse=True)))
     return f"🎲 Godbound `[{kept_str}]` (total {total}) → **{dmg}** dégâts"
 
 
@@ -306,43 +300,64 @@ def _evaluate(expression: str) -> tuple[str, bool]:
 
 
 def _roll_part(expr: str) -> str:
-    expr = expr.strip()
-    low = expr.lower()
-    if low == "dndstats":
-        return _roll_dndstats()
-    if low == "age":
-        return _roll_age()
-    match = re.fullmatch(r"(\d+)df", low)
-    if match:
-        return _roll_fate(int(match[1]))
-    for name, handler in (("wng", _roll_wng), ("dh", _roll_dh), ("gb", _roll_gb)):
-        match = re.fullmatch(name + r"\s*(\d*)", low)
-        if match:
-            return handler(match[1])
-    match = re.fullmatch(r"(\d+)wh(\d+)\+?", low)
-    if match:
-        return _roll_wh(int(match[1]), int(match[2]))
-
-    # Parse the complete expression once before evaluating any repeated sets.
-    match = re.fullmatch(r"(\d+)\s+((?:\d*d\d+|\().*)", low)
-    if match:
+    body, flags = extract_flags(expr)
+    # One repeat prefix; the body is compiled once and cannot contain another.
+    match = re.fullmatch(r"(\d+)\s+(.+)", body)
+    if match and match[2][0] not in "+-*/":
         n_sets = int(match[1])
         if not 1 <= n_sets <= MAX_SETS:
             raise ParseError(f"Le nombre de séries doit être compris entre 1 et {MAX_SETS}.")
-        parsed = _parse_math(match[2])
-        return "\n".join(f"`#{index + 1}` {_render_math(parsed)}" for index in range(n_sets))
+        render = _compile_part(match[2], flags)
+        return "\n".join(f"`#{index + 1}` {render()}" for index in range(n_sets))
+    return _compile_part(body, flags)()
 
+
+def _compile_part(expr: str, flags: set[str]):
+    low = expr.lower()
+    render = None
+    if low == "dndstats":
+        render = partial(_roll_dndstats, unsorted="ul" in flags)
+    elif low == "age":
+        render = _roll_age
+    for name, handler in (("wng", _roll_wng), ("dh", _roll_dh), ("gb", _roll_gb)):
+        match = re.fullmatch(name + r"\s*(\d*)", low)
+        if match:
+            argument = match[1]
+            if not argument and name != "gb":
+                raise ParseError(f"Usage : `{name} <nombre>` — consulte `/roll help`.")
+            if name != "dh":
+                _validate_count(int(argument) if argument else 1)
+            if name == "gb":
+                render = partial(_roll_gb, argument, unsorted="ul" in flags)
+            else:
+                render = partial(handler, argument)
+            break
+    match = re.fullmatch(r"(\d+)wh(\d+)\+?", low)
+    if match:
+        count, threshold = int(match[1]), int(match[2])
+        _validate_count(count)
+        render = partial(_roll_wh, count, threshold)
+    if render is not None:
+        def render_special():
+            output = render()
+            if flags.intersection({"s", "sl", "nr"}):
+                output = re.sub(r"`\[[^`\n]*\]`", "", output)
+                output = "\n".join(re.sub(r"[ \t]+", " ", line).strip() for line in output.splitlines())
+            return output
+        return render_special
     expanded = _expand_alias(expr)
-    return _render_math(_parse_math(expanded if expanded is not None else expr))
+    parsed = _parse_math(expanded if expanded is not None else expr, flags)
+    return partial(_render_math, parsed)
 
 
 def get_help() -> str:
     return (
+        "`/roll <expression>` — lancer des dés · `/roll help` — afficher cette aide\n\n"
         "**Syntaxe de base**\n"
         "`XdY` — lancer X dés à Y faces · `2d6+3` · `1d20-1` · `4d6*2`\n"
         "Calcul : `+ - * /` et parenthèses ; `* /` sont prioritaires\n"
         "Exemples : `1d6+5+2` · `(1d6+2)*3` · `1d6/2` (résultat exact)\n"
-        "`N XdY...` — N séries, ex: `6 4d6` ou `2 1d6+1d20`\n"
+        "`N expression` — N séries, ex: `6 4d6`, `2 4df` ou `2 1d6+1d20`\n"
         "`;` — séparer jusqu'à 4 lancers\n\n"
         "**Modificateurs**\n"
         "`k3` garder 3 hauts · `kl3` garder 3 bas · `d1` drop 1 bas\n"
@@ -359,6 +374,8 @@ def get_help() -> str:
         "`+d20` avantage · `-d20` désavantage\n\n"
         "**Systèmes**\n"
         "`wng N` Wrath & Glory · `dh N` Dark Heresy 2e · `gb N` Godbound\n\n"
+        "Options sur les alias : `4df s`, `age nr`, `2 4df`\n"
+        "Bonus sur les alias numériques : `ed7+2`, `4df+1`\n\n"
         "**Limites**\n"
         f"{MAX_DICE} dés par groupe · {MAX_SETS} séries · {MAX_PARTS} lancers par commande\n"
         f"{MAX_TOTAL_DRAWS} tirages au total, relances et explosions comprises\n"

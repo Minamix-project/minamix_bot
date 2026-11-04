@@ -18,6 +18,7 @@ class RollLimitError(ParseError):
 class DiceSpec:
     count: int
     sides: int
+    kind: str = "standard"
     explode: int | None = None
     infinite_explode: bool = False
     reroll: int | None = None
@@ -35,6 +36,8 @@ class DiceSpec:
             raise ParseError(f"Maximum {max_dice} dés par groupe.")
         if not 1 <= self.sides <= max_sides:
             raise ParseError(f"Le nombre de faces par dé doit être compris entre 1 et {max_sides}.")
+        if self.kind == "fate" and any(value is not None for value in (self.explode, self.reroll, self.target, self.fail, self.botch)):
+            raise ParseError("Les dés Fate acceptent les calculs, k/kl/d et les options s/nr/ul, sans seuils de relance, explosion ou succès.")
         if self.explode is not None and not 1 <= self.explode <= self.sides:
             raise ParseError(f"Le seuil d'explosion doit être compris entre 1 et {self.sides}.")
         if self.reroll is not None and not 0 <= self.reroll <= self.sides:
@@ -46,8 +49,16 @@ class DiceSpec:
             raise ParseError("Explosion sans fin impossible à terminer : aucun résultat ne peut arrêter la chaîne avec ces seuils.")
         if self.selection in {"k", "kl"} and self.selection_count < 1:
             raise ParseError("Il faut garder au moins 1 dé avec k ou kl.")
+        if self.selection and self.explode is None:
+            self.validate_selection(self.count)
         if self.target is None and (self.fail is not None or self.botch is not None):
             raise ParseError("Les modificateurs f et b nécessitent un seuil de succès, par exemple `5d10 t8 f1`.")
+
+    def validate_selection(self, available: int):
+        if self.selection in {"k", "kl"} and self.selection_count > available:
+            raise ParseError(f"Impossible de garder {self.selection_count} dés : ce groupe ne contient que {available} dé(s).")
+        if self.selection == "d" and self.selection_count >= available:
+            raise ParseError(f"Impossible d'écarter {self.selection_count} dés sur {available} : il faut conserver au moins un dé.")
 
 
 def _apply(operator: str, left: Fraction, right: Fraction) -> Fraction:
@@ -92,14 +103,18 @@ class PoolResult:
 
     def details(self, *, unsorted: bool) -> str:
         values = self.kept if unsorted else sorted(self.kept, reverse=True)
-        kept = " ".join(str(value) for value in values)
-        dropped = " · Écartés : ~~`[" + " ".join(str(value) for value in self.dropped) + "]`~~" if self.dropped else ""
+        def display(value):
+            return {-1: "−", 0: "□", 1: "+"}[value] if self.spec.kind == "fate" else str(value)
+        kept = " ".join(display(value) for value in values)
+        dropped = " · Écartés : ~~`[" + " ".join(display(value) for value in self.dropped) + "]`~~" if self.dropped else ""
         return f"`[{kept}]`{dropped}"
 
 
 def roll_pool(spec: DiceSpec, draw: Callable[[int], int], *, explode_cap: int, reroll_cap: int) -> PoolResult:
     def die():
         value = draw(spec.sides)
+        if spec.kind == "fate":
+            return value - 2
         if spec.reroll is None:
             return value
         if not spec.infinite_reroll:
@@ -131,6 +146,8 @@ def roll_pool(spec: DiceSpec, draw: Callable[[int], int], *, explode_cap: int, r
             pending = sum(value >= spec.explode for value in values) if spec.infinite_explode else 0
             generations += 1
     values = rolls + extra
+    if spec.selection:
+        spec.validate_selection(len(values))
     kept_indices = set(range(len(values)))
     if spec.selection:
         ordered = sorted(range(len(values)), key=lambda index: values[index], reverse=spec.selection == "k")
@@ -174,6 +191,8 @@ class ParsedExpression:
                 right, left = stack.pop(), stack.pop()
                 stack.append(_apply(token, left, right))
         result = format_number(stack[0])
+        if all(pool.spec.kind == "fate" for pool in pools) and stack[0] >= 0:
+            result = "+" + result
         suffix = " succès" if self.successes else ""
         blocks = ""
         if not self.flags.intersection({"s", "sl", "nr"}):
@@ -183,17 +202,24 @@ class ParsedExpression:
         return f"🎲 {self.label}{blocks} → **{result}**{suffix}{note}"
 
 
+def extract_flags(expression: str) -> tuple[str, set[str]]:
+    flags = {flag.lower() for flag in re.findall(r"\b(nr|ul|sl|s)\b", expression, flags=re.I)}
+    body = re.sub(r"\b(nr|ul|sl|s)\b", "", expression, flags=re.I)
+    return re.sub(r"\s+", " ", body).strip(), flags
+
+
 class ExpressionParser:
     """Parse to a flat postfix program, preserving standard operator precedence."""
 
-    def __init__(self, expression: str, *, max_dice: int, max_sides: int):
-        self.flags = set(re.findall(r"\b(nr|ul|sl|s)\b", expression, flags=re.I))
-        self.flags = {flag.lower() for flag in self.flags}
-        self.expression = re.sub(r"\b(nr|ul|sl|s)\b", "", expression, flags=re.I)
-        self.expression = re.sub(r"\s+", " ", self.expression).strip().lower()
+    def __init__(self, expression: str, *, max_dice: int, max_sides: int,
+                 alias_expander: Callable[[str], str | None] | None = None, flags: set[str] | None = None):
+        body, extracted = extract_flags(expression)
+        self.flags = extracted | (flags or set())
+        self.expression = body.lower()
         self.position = 0
         self.tokens = []
         self.max_dice, self.max_sides = max_dice, max_sides
+        self.alias_expander = alias_expander
 
     def skip_space(self):
         while self.position < len(self.expression) and self.expression[self.position].isspace():
@@ -261,6 +287,22 @@ class ExpressionParser:
             if not self.take(")"):
                 raise ParseError("Il manque une parenthèse fermante `)`.")
             return
+        match = re.match(r"(\d+)df", self.expression[self.position:])
+        if match:
+            self.position += match.end()
+            self.tokens.append(self.dice(int(match[1]), 3, kind="fate"))
+            return
+        match = re.match(r"ed\d+(?:e\d+)?|sr\d+|\d+(?:cod|wod)\d*|(?:attack|skill|save)\s*[+-]?\d+",
+                         self.expression[self.position:])
+        if match and self.alias_expander is not None:
+            expanded = self.alias_expander(match[0])
+            if expanded is not None and expanded != match[0]:
+                nested = ExpressionParser(expanded, max_dice=self.max_dice, max_sides=self.max_sides)
+                parsed = nested.parse()
+                self.tokens.extend(parsed.tokens)
+                self.flags.update(parsed.flags)
+                self.position += match.end()
+                return
         match = re.match(r"(\d*)d(\d+)", self.expression[self.position:])
         if match:
             self.position += match.end()
@@ -273,8 +315,8 @@ class ExpressionParser:
             return
         self.unknown()
 
-    def dice(self, count: int, sides: int) -> DiceSpec:
-        values = {"count": count, "sides": sides}
+    def dice(self, count: int, sides: int, *, kind: str = "standard") -> DiceSpec:
+        values = {"count": count, "sides": sides, "kind": kind}
         seen = set()
         while True:
             self.skip_space()
@@ -313,5 +355,8 @@ class ExpressionParser:
         )
 
 
-def parse_expression(expression: str, *, max_dice: int, max_sides: int) -> ParsedExpression:
-    return ExpressionParser(expression, max_dice=max_dice, max_sides=max_sides).parse()
+def parse_expression(expression: str, *, max_dice: int, max_sides: int,
+                     alias_expander: Callable[[str], str | None] | None = None,
+                     flags: set[str] | None = None) -> ParsedExpression:
+    return ExpressionParser(expression, max_dice=max_dice, max_sides=max_sides,
+                            alias_expander=alias_expander, flags=flags).parse()
