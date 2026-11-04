@@ -12,7 +12,7 @@ def test_registered_command_permissions():
     asyncio.run(load_modules(bot, "src/commands", "CMD"))
     registered = {command.name: command for command in bot.tree.get_commands()}
 
-    assert len(registered) == 56
+    assert len(registered) == 58
     assert "reminder" in registered
     assert "rappel" not in registered
     assert "remind" not in registered

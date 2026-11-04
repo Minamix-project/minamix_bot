@@ -15,6 +15,7 @@ _CONFIG_LABELS = {
     "afk_logs_channel": "Logs des absences",
     "rp_channel": "Salon RP",
     "error_logs_channel": "Logs des erreurs techniques",
+    "devlog_channel": "Devlog du bot",
 }
 
 
