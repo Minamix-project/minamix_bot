@@ -132,7 +132,7 @@ class NaxTransferView(discord.ui.View):
 
 
 async def register(bot):
-    @bot.tree.command(name="pay", description="Envoyer de largent ou des NAX à un joueur")
+    @bot.tree.command(name="pay", description="Envoyer de l'argent ou des NAX à un joueur")
     @app_commands.describe(user="Destinataire", amount="Montant à envoyer", reason="Motif du transfert")
     async def pay(interaction: Interaction, user: Member, amount: int, reason: str):
         if not interaction.guild_id or not reason.strip() or amount <= 0 or user.id == interaction.user.id:

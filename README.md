@@ -237,14 +237,26 @@ size bound; oversized snapshots are rejected without storing a partial body.
 | `/messagehistory configure [enabled] [retention_days] [max_entries] [confirm]` | Change retention/capacity; disabling erases stored history — admin |
 | `/messagehistory purge <channel> [message_id] [confirm]` | Erase retained versions for one channel or message — admin |
 
-Consultation requires Manage Messages (or the existing administrative access
-rule), plus View Channel and Read Message History in the source channel for both
+All message-history commands require **Manage Server** or **Administrator**,
+plus View Channel and Read Message History in the source channel for both
 the caller and bot. Private threads additionally require membership or Manage
 Threads. Source access is checked again on every button interaction. Pages are
 loaded afresh so purged/expired records cannot be downloaded from cached views;
 responses are ephemeral and views expire after two minutes. Specify the source
 channel when running the command in a different channel. No decrypted message
 body is written to console logs or the administrative audit trail.
+
+Discord command visibility defaults to **Manage Server**, matching the bot's
+administrative runtime checks and help visibility. **Manage Messages alone does
+not grant access** to any history command, including consultation. No role name
+or role ID is required. `/help` lists all six commands under **Admin · Suivi des
+messages** for members with Manage Server or Administrator. Every administrative
+help page rechecks these permissions when selected. Command permission changes
+take effect after deployment and the bot's normal guild-command synchronization.
+
+The public Economy help page documents `/pay <user> <amount> <reason>` for player
+transfers. The Roleplay page also references `/pay` for NAX transfers between
+characters; both use the existing currency-selection flow.
 
 Import is explicit, newest-first, bounded to the retention window, and limited
 to one operation per guild. It scans 200 messages by default, up to 1,000, with

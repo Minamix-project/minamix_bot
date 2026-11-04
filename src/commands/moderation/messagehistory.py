@@ -1,4 +1,4 @@
-"""Private, source-permission-aware moderation tools for retained messages."""
+"""Private administrative message history with source-channel access checks."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -19,14 +19,12 @@ EventFilter = Literal["changes", "edited", "deleted", "all"]
 NO_MENTIONS = discord.AllowedMentions.none()
 
 
-def is_moderator(interaction) -> bool:
-    return bool(interaction.guild_id in GUILD_IDS and (
-        is_admin(interaction.user) or interaction.permissions.manage_messages
-    ))
+def has_history_access(interaction) -> bool:
+    return interaction.guild_id in GUILD_IDS and is_admin(interaction.user)
 
 
 async def source_channel(interaction, channel_id: int):
-    if not is_moderator(interaction):
+    if not has_history_access(interaction):
         raise app_commands.CheckFailure
     channel = interaction.guild.get_channel_or_thread(channel_id)
     if channel is None:
@@ -40,7 +38,7 @@ async def source_channel(interaction, channel_id: int):
     bot_permissions = channel.permissions_for(interaction.guild.me)
     if not (permissions.view_channel and permissions.read_message_history and
             bot_permissions.view_channel and bot_permissions.read_message_history and
-            (permissions.manage_messages or is_admin(interaction.user))):
+            is_admin(interaction.user)):
         raise app_commands.CheckFailure
     if isinstance(channel, discord.Thread) and channel.is_private():
         for member, member_permissions in ((interaction.user, permissions), (interaction.guild.me, bot_permissions)):
@@ -198,13 +196,13 @@ class HistoryView(ExpiringView):
 
 
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_messages=True)
+@app_commands.default_permissions(manage_guild=True)
 class MessageHistoryCommands(app_commands.Group):
     def __init__(self):
         super().__init__(name="messagehistory", description="Consulter le suivi privé des messages et gérer sa conservation.")
 
     async def interaction_check(self, interaction):
-        if not is_moderator(interaction):
+        if not has_history_access(interaction):
             raise app_commands.CheckFailure
         return True
 
