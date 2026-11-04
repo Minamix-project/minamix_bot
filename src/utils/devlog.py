@@ -163,15 +163,15 @@ def _escape_inline(value):
     return re.sub(r"([\\`*_~|\[\]()<>])", r"\\\1", " ".join(value.split()))
 
 
-def render_pages(releases, bot_name, *, major_emoji, minor_emoji):
+def render_pages(releases, bot_id, *, major_emoji, minor_emoji):
     pages = []
     current = ""
-    name = _escape_inline(bot_name)
+    mention = f"<@{bot_id}>"
     for release in sorted(releases, key=lambda entry: entry.version):
         version = release.version
         prefix = "-" if version.patch else major_emoji if version.minor == 0 else minor_emoji
         title = _escape_inline(release.title)
-        line = f"{prefix} **Changelog {version.tag} @{name}** - [{title}]({release.url})"
+        line = f"{prefix} **Changelog {version.tag} {mention}** - [{title}]({release.url})"
         if _length(line) > MESSAGE_LIMIT:
             raise DevlogError("Une entrée du devlog dépasse la limite Discord de 2 000 caractères.")
         combined = f"{current}\n{line}" if current else line
@@ -249,7 +249,7 @@ async def publish_devlog(bot, guild, member, releases, *, preview=False):
             entries.update({entry.tag: entry for entry in releases})
             merged = sorted(entries.values(), key=lambda entry: entry.version)
             major_emoji, minor_emoji = devlog_emojis(bot, channel)
-            pages = render_pages(merged, str(bot.user), major_emoji=major_emoji, minor_emoji=minor_emoji)
+            pages = render_pages(merged, bot.user.id, major_emoji=major_emoji, minor_emoji=minor_emoji)
             if preview:
                 await db.rollback()
                 return Publication(pages, channel.id)
@@ -258,14 +258,15 @@ async def publish_devlog(bot, guild, member, releases, *, preview=False):
             )
             message_ids = []
             created = edited = 0
+            mentions = discord.AllowedMentions(everyone=False, roles=False, users=[bot.user], replied_user=False)
             for index, content in enumerate(pages):
                 if index < len(existing):
                     message = existing[index]
                     if message.content != content:
-                        await message.edit(content=content, allowed_mentions=NO_MENTIONS, suppress=True)
+                        await message.edit(content=content, allowed_mentions=mentions, suppress=True)
                         edited += 1
                 else:
-                    message = await channel.send(content, allowed_mentions=NO_MENTIONS, suppress_embeds=True)
+                    message = await channel.send(content, allowed_mentions=mentions, suppress_embeds=True)
                     created += 1
                 message_ids.append(message.id)
             for message in existing[len(pages):]:

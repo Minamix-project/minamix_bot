@@ -72,12 +72,12 @@ def test_github_errors_are_actionable(monkeypatch, status, notice):
 
 
 def render(entries):
-    return devlog.render_pages(entries, "Aurum#9925", major_emoji="<:kchoc:111>", minor_emoji="<:kgun:222>")
+    return devlog.render_pages(entries, BOT_USER.id, major_emoji="<:kchoc:111>", minor_emoji="<:kgun:222>")
 
 
 def test_format_distinguishes_major_minor_and_patches_and_sorts_numerically():
     pages = render([release("v1.8.10"), release("v1.8.2"), release("v1.8.0")])
-    assert pages[0].startswith("<:kgun:222> **Changelog v1.8.0 @Aurum#9925** - [Add message history](https://")
+    assert pages[0].startswith("<:kgun:222> **Changelog v1.8.0 <@99>** - [Add message history](https://")
     assert pages[0].splitlines()[1].startswith("- **Changelog v1.8.2")
     assert pages[0].splitlines()[2].startswith("- **Changelog v1.8.10")
     assert render([release("v2.0.0"), release("v2.0.1")])[0].startswith("<:kchoc:111>")
@@ -179,7 +179,7 @@ def test_repeat_publications_edit_existing_posts_and_preserve_newer_patches(monk
         _db, cursor = fake_database(monkeypatch)
         first = await devlog.publish_devlog(bot, guild, member, [release()])
         assert first.created == 1
-        assert channel.send.await_args.kwargs["allowed_mentions"].to_dict() == {"parse": []}
+        assert channel.send.await_args.kwargs["allowed_mentions"].to_dict() == {"parse": [], "users": [99]}
         assert channel.send.await_args.kwargs["suppress_embeds"]
         _db, cursor = fake_database(monkeypatch, row=saved_row(cursor))
         repeated = await devlog.publish_devlog(bot, guild, member, [release()])
@@ -187,12 +187,29 @@ def test_repeat_publications_edit_existing_posts_and_preserve_newer_patches(monk
         _db, cursor = fake_database(monkeypatch, row=saved_row(cursor))
         patch = await devlog.publish_devlog(bot, guild, member, [release("v1.8.1", "Fix dice")])
         assert patch.created == 0 and patch.edited == 1
+        message = next(iter(messages.values()))
+        assert message.edit.await_args.kwargs["allowed_mentions"].to_dict() == {"parse": [], "users": [99]}
+        assert "<@99>" in message.content
         _db, cursor = fake_database(monkeypatch, row=saved_row(cursor))
         older = await devlog.publish_devlog(bot, guild, member, [release()])
         assert older.created == older.edited == 0
         assert older.message_ids == first.message_ids
         assert len(messages) == channel.send.await_count == 1
         assert "v1.8.1" in next(iter(messages.values())).content
+    asyncio.run(scenario())
+
+
+def test_existing_text_name_is_replaced_with_a_bot_mention_without_a_new_post(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+
+    async def scenario():
+        original = await channel.send("🎯 **Changelog v1.8.0 @Aurum#9925** - Old announcement")
+        fake_database(monkeypatch)
+        result = await devlog.publish_devlog(bot, guild, member, [release()])
+        assert result.created == 0 and result.edited == 1
+        assert result.message_ids == (original.id,)
+        assert "**Changelog v1.8.0 <@99>**" in original.content
+        assert len(messages) == 1
     asyncio.run(scenario())
 
 
