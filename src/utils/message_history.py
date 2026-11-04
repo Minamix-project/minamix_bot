@@ -224,6 +224,8 @@ class HistoryStore:
         now = int(time.time()) if now is None else now
         snapshot = snapshot or MessageSnapshot()
         result = HistoryResult(snapshot, MessageSnapshot.from_update(update, snapshot) if update is not None else None)
+        if snapshot.automated is True or (result.after is not None and result.after.automated is True):
+            return result
         db = await get_db_connection()
         try:
             await db.begin()
@@ -245,6 +247,9 @@ class HistoryStore:
                 before = merge_snapshot(snapshot, previous)
                 after = MessageSnapshot.from_update(update, before) if update is not None else None
                 result = HistoryResult(before, after)
+                if not (after or before).is_human:
+                    await db.rollback()
+                    return result
                 if row and (kind in {"created", "imported"} or row["event_kind"] == "deleted"):
                     await db.rollback()
                     return HistoryResult(before, before if kind == "edited" else None)

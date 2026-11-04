@@ -31,9 +31,12 @@ class MessageHistory(commands.Cog):
             return
         if self.bot.user is not None and message.author.id == self.bot.user.id:
             return
+        snapshot = MessageSnapshot.from_message(message)
+        if not snapshot.is_human:
+            return
         try:
             await self.store.record(
-                message.guild.id, message.channel.id, message.id, "created", MessageSnapshot.from_message(message),
+                message.guild.id, message.channel.id, message.id, "created", snapshot,
             )
         except Exception as exc:
             # Driver errors can contain SQL parameters; never log their bodies.

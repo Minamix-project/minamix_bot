@@ -84,6 +84,7 @@ _MESSAGE_HISTORY_ADMIN = (
 
 _MESSAGE_HISTORY_ACCESS = (
     "Réponses privées ; accès au salon d'origine vérifié. "
+    "Les messages des bots, applications et webhooks ne sont pas suivis. "
     "Toutes les commandes de cette rubrique sont réservées aux membres ayant "
     "« Administrateur » ou « Gérer le serveur »."
 )

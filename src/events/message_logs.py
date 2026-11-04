@@ -68,18 +68,20 @@ async def send_log(channel, embed: discord.Embed, file: discord.File | None, *, 
 
 
 async def register(bot):
-    def is_own_message(snapshot: MessageSnapshot) -> bool:
-        return bot.user is not None and snapshot.author_id == bot.user.id
+    def is_ignored(snapshot: MessageSnapshot) -> bool:
+        return snapshot.automated is True or (bot.user is not None and snapshot.author_id == bot.user.id)
 
     @bot.listen("on_raw_message_delete")
     async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         if payload.guild_id not in GUILD_IDS:
             return
         before = MessageSnapshot.from_message(payload.cached_message) if payload.cached_message else MessageSnapshot()
-        if is_own_message(before):
+        if is_ignored(before):
             return
         result = await resolve_history(bot, payload.guild_id, payload.channel_id, payload.message_id, "deleted", before)
         before = result.before
+        if is_ignored(before) or not before.is_human:
+            return
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
             await send_log(channel, *build_message_log(
@@ -95,7 +97,7 @@ async def register(bot):
             return
         before = MessageSnapshot.from_message(payload.cached_message) if payload.cached_message else MessageSnapshot()
         after = MessageSnapshot.from_update(payload.data, before)
-        if is_own_message(after):
+        if is_ignored(before) or is_ignored(after):
             return
         if payload.cached_message is not None and same_content(before, after):
             return
@@ -103,6 +105,8 @@ async def register(bot):
             bot, payload.guild_id, payload.channel_id, payload.message_id, "edited", before, update=payload.data,
         )
         before, after = result.before, result.after
+        if is_ignored(before) or is_ignored(after) or not after.is_human:
+            return
         if same_content(before, after):
             return
         channel = await get_logs_channel(bot, payload.guild_id)
@@ -119,8 +123,8 @@ async def register(bot):
             message.id: MessageSnapshot.from_message(message)
             for message in payload.cached_messages
         }
-        own_ids = {message_id for message_id, snapshot in snapshots.items() if is_own_message(snapshot)}
-        message_ids = payload.message_ids - own_ids
+        ignored_ids = {message_id for message_id, snapshot in snapshots.items() if is_ignored(snapshot)}
+        message_ids = payload.message_ids - ignored_ids
         if not message_ids:
             return
         snapshots = {message_id: snapshot for message_id, snapshot in snapshots.items() if message_id in message_ids}
@@ -129,8 +133,14 @@ async def register(bot):
                 bot, payload.guild_id, payload.channel_id, message_id, "deleted",
                 snapshots.get(message_id, MessageSnapshot()),
             )
+            if is_ignored(result.before) or not result.before.is_human:
+                message_ids.remove(message_id)
+                snapshots.pop(message_id, None)
+                continue
             if result.before.content is not None or result.before.attachments is not None:
                 snapshots[message_id] = result.before
+        if not message_ids:
+            return
         channel = await get_logs_channel(bot, payload.guild_id)
         if channel is not None:
             await send_log(

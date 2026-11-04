@@ -18,10 +18,12 @@ BOT_USER = discord.ClientUser(state=None, data={
 })
 
 
-def message(content="Original text", *, author_id=42, attachments=(), message_id=MESSAGE_ID):
+def message(content="Original text", *, author_id=42, attachments=(), message_id=MESSAGE_ID,
+            bot=False, webhook_id=None, application_id=None):
     return SimpleNamespace(
         id=message_id, content=content,
-        author=SimpleNamespace(id=author_id), attachments=attachments,
+        author=SimpleNamespace(id=author_id, bot=bot), attachments=attachments,
+        webhook_id=webhook_id, application_id=application_id,
     )
 
 
@@ -80,12 +82,11 @@ def test_cached_deletion_has_content_author_identifiers_and_no_pings(monkeypatch
     assert kwargs["allowed_mentions"].to_dict() == {"parse": []}
 
 
-def test_uncached_deletion_is_reported_without_inventing_content(monkeypatch):
-    channel, _lookup, listeners = setup_listeners(monkeypatch)
+def test_deletion_without_identifiable_origin_is_ignored(monkeypatch):
+    channel, lookup, listeners = setup_listeners(monkeypatch)
     asyncio.run(listeners["on_raw_message_delete"](deletion()))
-    values = fields(channel.send.await_args.kwargs["embed"])
-    assert values["Contenu supprimé"] == UNAVAILABLE
-    assert "Auteur inconnu" in values["Auteur du message"]
+    lookup.assert_not_awaited()
+    channel.send.assert_not_awaited()
 
 
 def test_edit_uses_event_content_and_includes_before_after_and_link(monkeypatch):
@@ -146,6 +147,40 @@ def test_own_messages_do_not_create_recursive_logs(monkeypatch):
     channel.send.assert_not_awaited()
 
 
+@pytest.mark.parametrize("origin", [{"bot": True}, {"webhook_id": 1234}, {"application_id": 5678}])
+def test_automated_cached_messages_skip_logging_and_storage(monkeypatch, origin):
+    channel, lookup, listeners = setup_listeners(monkeypatch)
+    resolve = AsyncMock()
+    monkeypatch.setattr(handler, "resolve_history", resolve)
+    automated_message = message(**origin)
+    asyncio.run(listeners["on_raw_message_delete"](deletion(automated_message)))
+    asyncio.run(listeners["on_raw_message_edit"](update({"content": "Changed"}, automated_message)))
+    resolve.assert_not_awaited()
+    lookup.assert_not_awaited()
+    channel.send.assert_not_awaited()
+
+
+@pytest.mark.parametrize("origin", [
+    {"author": {"id": "43", "bot": True}}, {"webhook_id": "1234"}, {"application_id": "5678"},
+])
+@pytest.mark.parametrize("cached", [False, True])
+def test_raw_automated_edits_skip_logging_and_storage(monkeypatch, origin, cached):
+    channel, lookup, listeners = setup_listeners(monkeypatch)
+    resolve = AsyncMock()
+    monkeypatch.setattr(handler, "resolve_history", resolve)
+    asyncio.run(listeners["on_raw_message_edit"](update({"content": "Changed", **origin}, message() if cached else None)))
+    resolve.assert_not_awaited()
+    lookup.assert_not_awaited()
+    channel.send.assert_not_awaited()
+
+
+def test_uncached_edit_without_identifiable_origin_is_ignored(monkeypatch):
+    channel, lookup, listeners = setup_listeners(monkeypatch)
+    asyncio.run(listeners["on_raw_message_edit"](update({"content": "Changed"})))
+    lookup.assert_not_awaited()
+    channel.send.assert_not_awaited()
+
+
 def test_unconfigured_channel_does_not_send(monkeypatch):
     channel, lookup, listeners = setup_listeners(monkeypatch)
     lookup.return_value = None
@@ -179,13 +214,17 @@ def test_empty_text_is_distinct_from_unknown_text_and_markdown_is_escaped():
     assert fields(embed)["Contenu supprimé"] == r"\*\*text\*\*"
 
 
-def test_bulk_deletion_sends_one_summary_with_cached_and_uncached_records(monkeypatch):
+def test_bulk_deletion_only_counts_identifiable_human_messages(monkeypatch):
     channel, _lookup, listeners = setup_listeners(monkeypatch)
     payload = discord.RawBulkMessageDeleteEvent({
         "guild_id": str(GUILD_ID), "channel_id": str(CHANNEL_ID),
-        "ids": [str(MESSAGE_ID + offset) for offset in range(3)],
+        "ids": [str(MESSAGE_ID + offset) for offset in range(6)],
     })
-    payload.cached_messages = [message("Bulk deleted text"), message(author_id=99, message_id=MESSAGE_ID + 1)]
+    payload.cached_messages = [
+        message("Bulk deleted text"), message(author_id=99, message_id=MESSAGE_ID + 1),
+        message(bot=True, message_id=MESSAGE_ID + 3), message(webhook_id=1234, message_id=MESSAGE_ID + 4),
+        message(application_id=5678, message_id=MESSAGE_ID + 5),
+    ]
     captured = []
 
     async def capture(**kwargs):
@@ -195,13 +234,24 @@ def test_bulk_deletion_sends_one_summary_with_cached_and_uncached_records(monkey
     asyncio.run(listeners["on_raw_bulk_message_delete"](payload))
     channel.send.assert_awaited_once()
     embed, transcript = captured[0]
-    assert fields(embed)["Messages supprimés"] == "2"
+    assert fields(embed)["Messages supprimés"] == "1"
     assert fields(embed)["Contenus disponibles"] == "1"
-    assert fields(embed)["Contenus indisponibles"] == "1"
+    assert fields(embed)["Contenus indisponibles"] == "0"
     assert "Bulk deleted text" in transcript
-    assert UNAVAILABLE in transcript
-    assert str(MESSAGE_ID + 2) in transcript
-    assert str(MESSAGE_ID + 1) not in transcript
+    for offset in range(1, 6):
+        assert str(MESSAGE_ID + offset) not in transcript
+
+
+def test_bulk_deletion_of_only_automated_messages_is_silent(monkeypatch):
+    channel, lookup, listeners = setup_listeners(monkeypatch)
+    resolve = AsyncMock()
+    monkeypatch.setattr(handler, "resolve_history", resolve)
+    payload = SimpleNamespace(guild_id=GUILD_ID, channel_id=CHANNEL_ID, message_ids={MESSAGE_ID},
+                              cached_messages=[message(bot=True)])
+    asyncio.run(listeners["on_raw_bulk_message_delete"](payload))
+    resolve.assert_not_awaited()
+    lookup.assert_not_awaited()
+    channel.send.assert_not_awaited()
 
 
 def test_large_bulk_transcript_respects_embed_limits():
