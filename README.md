@@ -205,14 +205,22 @@ Long records include a UTF-8 text file with the unabridged content. Bulk deletio
 produce one summary and a text transcript. The bot needs View Channel, Send
 Messages, Embed Links, and Attach Files in the destination. If attaching a file is
 forbidden, the bot sends the summary with an explicit notice instead. Mentions in
-logs never ping users or roles. The bot's own cached messages are excluded to
-avoid logging its own log deletions.
+logs never ping users or roles. Messages from all bots, applications, and webhooks
+(including RP proxies and the bot's own logs) are excluded from capture, imports,
+edits, single deletions, and bulk-deletion summaries. Automated messages identified
+in the cache or Gateway payload are rejected before any history database lookup.
 
 Previous content is resolved from Discord's cache and encrypted MySQL history,
 so tracked messages survive bot restarts. Collection starts when `/setlogs` is
-configured, unless an administrator disables it. The bot's own messages and DMs
-are excluded. Content that was never received/imported or has expired is marked
+configured, unless an administrator disables it. DMs are excluded. Content that
+was never received/imported or has expired is marked
 unavailable; Discord cannot supply a deleted message or an earlier edit version.
+Events without an identifiable human origin are skipped: raw deletions contain
+no author, so the bot needs its message cache or retained history to classify
+them. Origin metadata is encrypted with each new snapshot and survives restarts;
+older snapshots remain readable, but require a cached message or a subsequent
+edit with author information before their origin can be established. Existing
+history and previously sent Discord logs are not retroactively erased.
 Updates use the Gateway event's content rather than fetching a potentially newer
 version. Attachment URLs may expire; attachment binaries are not downloaded or
 reuploaded. General logs must be restricted to the intended moderation team.

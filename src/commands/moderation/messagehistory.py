@@ -246,6 +246,7 @@ class MessageHistoryCommands(app_commands.Group):
         embed.add_field(name="Versions stockées", value=f"{policy.entry_count} / {policy.max_entries}")
         embed.add_field(name="Par message", value="10 versions maximum")
         embed.add_field(name="Protection", value="Contenu chiffré · Consultation privée · Droits du salon vérifiés", inline=False)
+        embed.add_field(name="Messages suivis", value="Messages des utilisateurs uniquement ; bots, applications et webhooks exclus.", inline=False)
         embed.description = "Nettoyage toutes les 15 minutes et suppression des plus anciennes versions si une limite est atteinte. Les logs déjà envoyés sur Discord restent gérés par les administrateurs."
         embed.set_footer(text=str(interaction.client.user), icon_url=interaction.client.user.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -317,8 +318,11 @@ class MessageHistoryCommands(app_commands.Group):
                     scanned += 1
                     if message.author.id == interaction.client.user.id:
                         continue
+                    snapshot = MessageSnapshot.from_message(message)
+                    if not snapshot.is_human:
+                        continue
                     result = await cog.store.record(
-                        interaction.guild_id, channel.id, message.id, "imported", MessageSnapshot.from_message(message),
+                        interaction.guild_id, channel.id, message.id, "imported", snapshot,
                         source_created_at=int(message.created_at.timestamp()), expected_generation=policy.generation,
                     )
                     imported += int(result.recorded)

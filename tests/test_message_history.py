@@ -1,5 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+import json
 import os
 import time
 from types import SimpleNamespace
@@ -13,12 +15,12 @@ from src.commands.moderation import messagehistory as command
 from src.events import message_history as worker
 from src.events import message_logs as logs
 from src.utils import message_history as storage
-from src.utils.message_history import HistoryCipher, HistoryEntry, HistoryResult, HistoryStore, load_key
+from src.utils.message_history import HistoryCipher, HistoryEntry, HistoryPolicy, HistoryResult, HistoryStore, load_key
 from src.utils.message_logs import MessageSnapshot
 
 
 def snapshot(content="Private réunion 🎲", *, attachments=()):
-    return MessageSnapshot(42, "Alice", content, attachments)
+    return MessageSnapshot(42, "Alice", content, attachments, automated=False)
 
 
 def metadata(**changes):
@@ -36,6 +38,61 @@ def test_cipher_roundtrip_hides_content_names_and_attachment_urls():
         assert value.encode() not in row["payload"]
     with pytest.raises(InvalidToken):
         HistoryCipher(Fernet.generate_key()).decrypt(row)
+
+
+def test_origin_survives_encryption_restart_and_partial_edits():
+    key = Fernet.generate_key()
+    row = metadata()
+    row["payload"] = HistoryCipher(key).encrypt(snapshot(), row)
+    restored = HistoryCipher(key).decrypt(row)
+    assert restored.is_human
+    assert MessageSnapshot.from_update({"content": "Changed"}, restored).is_human
+    assert MessageSnapshot.from_update({"content": "Changed", "webhook_id": "1234"}, restored).automated
+
+
+def test_legacy_encrypted_snapshots_remain_readable_with_unknown_origin():
+    cipher = HistoryCipher(Fernet.generate_key())
+    row = metadata()
+    payload = json.loads(cipher._fernet.decrypt(cipher.encrypt(snapshot(), row)))
+    payload["snapshot"].pop("automated")
+    row["payload"] = cipher._fernet.encrypt(json.dumps(payload).encode("utf-8"))
+    restored = cipher.decrypt(row)
+    assert restored.content == snapshot().content
+    assert restored.automated is None
+    assert not restored.is_human
+
+
+@pytest.mark.parametrize("kind", ["created", "imported", "edited", "deleted"])
+def test_known_automated_messages_never_open_a_database_connection(monkeypatch, kind):
+    connect = AsyncMock()
+    monkeypatch.setattr(storage, "get_db_connection", connect)
+    store = HistoryStore(HistoryCipher(Fernet.generate_key()))
+    result = asyncio.run(store.record(1, 2, 3, kind, replace(snapshot(), automated=True)))
+    assert not result.recorded
+    connect.assert_not_awaited()
+
+
+@pytest.mark.parametrize("previous", [None, True])
+def test_unclassified_events_do_not_store_unknown_or_automated_history(monkeypatch, previous):
+    store = HistoryStore(HistoryCipher(Fernet.generate_key()))
+    row = None
+    if previous is not None:
+        row = dict(id=1, **metadata())
+        row["payload"] = store.cipher.encrypt(replace(snapshot(), automated=previous), row)
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = row
+    context = AsyncMock()
+    context.__aenter__.return_value = cursor
+    db = Mock(begin=AsyncMock(), rollback=AsyncMock(), commit=AsyncMock())
+    db.cursor.return_value = context
+    monkeypatch.setattr(storage, "get_db_connection", AsyncMock(return_value=db))
+    monkeypatch.setattr(store, "_policy", AsyncMock(return_value=HistoryPolicy(configured=True)))
+    result = asyncio.run(store.record(1, 2, 3, "edited", update={"content": "Changed"}))
+    assert not result.recorded
+    cursor.executemany.assert_not_awaited()
+    db.commit.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+    db.close.assert_called_once()
 
 
 @pytest.mark.parametrize("field,value", [("guild_id", 9), ("channel_id", 9), ("message_id", 9), ("author_id", 9),
@@ -104,7 +161,7 @@ def admin_setup(monkeypatch, *, allowed=True):
         guild_id=1, guild=guild, user=member, permissions=discord.Permissions(manage_guild=True),
         response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()), channel_id=2,
-        client=SimpleNamespace(user=SimpleNamespace(display_avatar=SimpleNamespace(url="https://example.com/bot.png"))),
+        client=SimpleNamespace(user=SimpleNamespace(id=99, display_avatar=SimpleNamespace(url="https://example.com/bot.png"))),
     )
     return interaction, channel
 
@@ -258,6 +315,69 @@ def test_live_capture_skips_private_guilds_and_own_messages(monkeypatch):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("origin", [
+    {"bot": False}, {"bot": True}, {"bot": False, "webhook_id": 1234},
+    {"bot": False, "application_id": 5678},
+])
+def test_live_capture_only_retains_human_messages(monkeypatch, origin):
+    monkeypatch.setattr(worker, "GUILD_IDS", {1})
+
+    async def scenario():
+        bot = Mock()
+        bot.user.id = 99
+        bot.wait_until_ready = asyncio.Event().wait
+        store = SimpleNamespace(record=AsyncMock())
+        cog = worker.MessageHistory(bot, store)
+        message = SimpleNamespace(
+            id=3, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=2), content="Text", attachments=[],
+            author=SimpleNamespace(id=42, bot=origin["bot"]), webhook_id=origin.get("webhook_id"),
+            application_id=origin.get("application_id"),
+        )
+        try:
+            await cog.capture(message)
+            if origin == {"bot": False}:
+                store.record.assert_awaited_once()
+                assert store.record.await_args.args[4].is_human
+            else:
+                store.record.assert_not_awaited()
+        finally:
+            await cog.cog_unload()
+    asyncio.run(scenario())
+
+
+def test_import_skips_automated_messages_and_keeps_the_scan_limit(monkeypatch):
+    interaction, channel = admin_setup(monkeypatch)
+    store = SimpleNamespace(
+        policy=AsyncMock(return_value=HistoryPolicy(configured=True)),
+        record=AsyncMock(return_value=HistoryResult(snapshot(), recorded=True)),
+    )
+    cog = SimpleNamespace(store=store, importing_guilds=set())
+    monkeypatch.setattr(command, "history_cog", lambda _interaction: cog)
+    audit = AsyncMock()
+    monkeypatch.setattr(command, "record_admin_action", audit)
+
+    async def history(**kwargs):
+        assert kwargs["limit"] == 5
+        for message_id, origin in enumerate([
+            {"bot": True}, {"webhook_id": 1234}, {"application_id": 5678}, {}, {"bot": True},
+        ], start=100):
+            yield SimpleNamespace(
+                id=message_id, author=SimpleNamespace(id=42, bot=origin.get("bot", False)), content="Text",
+                attachments=[], webhook_id=origin.get("webhook_id"), application_id=origin.get("application_id"),
+                created_at=discord.utils.utcnow(),
+            )
+
+    channel.history = history
+    group = command.MessageHistoryCommands()
+    asyncio.run(group.import_messages.callback(group, interaction, channel, limit=5))
+    store.record.assert_awaited_once()
+    assert store.record.await_args.args[2] == 103
+    assert store.record.await_args.args[4].is_human
+    assert "5 message(s) parcouru(s), 1 ajouté(s)" in interaction.followup.send.await_args.args[0]
+    assert not cog.importing_guilds
+    assert "scanned=5, imported=1" in audit.await_args.args[3]
+
+
 def test_cleanup_covers_guilds_removed_from_allowlist(monkeypatch):
     monkeypatch.setattr(worker, "GUILD_IDS", {1})
     store = SimpleNamespace(known_guilds=AsyncMock(return_value={1, 999}), cleanup=AsyncMock())
@@ -268,12 +388,16 @@ def test_cleanup_covers_guilds_removed_from_allowlist(monkeypatch):
     assert calls == {1: True, 999: False}
 
 
-def test_log_events_use_persistent_before_after_a_cache_loss(monkeypatch):
+@pytest.mark.parametrize("event", ["edited", "deleted", "bulk"])
+@pytest.mark.parametrize("automated", [False, True, None])
+def test_uncached_logs_only_include_persisted_human_messages(monkeypatch, event, automated):
     monkeypatch.setattr(logs, "GUILD_IDS", {1})
     channel = SimpleNamespace(send=AsyncMock())
-    monkeypatch.setattr(logs, "get_logs_channel", AsyncMock(return_value=channel))
-    saved = snapshot("Persisted before restart")
-    result = HistoryResult(saved, snapshot("Updated after restart"), True)
+    lookup = AsyncMock(return_value=channel)
+    monkeypatch.setattr(logs, "get_logs_channel", lookup)
+    saved = replace(snapshot("Persisted before restart"), automated=automated)
+    after = replace(snapshot("Updated after restart"), automated=automated) if event == "edited" else None
+    result = HistoryResult(saved, after, True)
     bot = Mock()
     bot.user.id = 99
     bot.user.display_avatar.url = "https://example.com/bot.png"
@@ -288,11 +412,24 @@ def test_log_events_use_persistent_before_after_a_cache_loss(monkeypatch):
 
     bot.listen = listen
     asyncio.run(logs.register(bot))
-    payload = SimpleNamespace(guild_id=1, channel_id=2, message_id=3, cached_message=None, data={"content": "Updated after restart"})
-    asyncio.run(callbacks["on_raw_message_edit"](payload))
+    payload = SimpleNamespace(guild_id=1, channel_id=2, message_id=3, cached_message=None,
+                              data={"content": "Updated after restart"}, cached_messages=[], message_ids={3})
+    callback = {"edited": "on_raw_message_edit", "deleted": "on_raw_message_delete", "bulk": "on_raw_bulk_message_delete"}[event]
+    asyncio.run(callbacks[callback](payload))
+    if automated is not False:
+        channel.send.assert_not_awaited()
+        lookup.assert_not_awaited()
+        return
+    channel.send.assert_awaited_once()
     values = {item.name: item.value for item in channel.send.await_args.kwargs["embed"].fields}
-    assert values["Avant"] == "Persisted before restart"
-    assert values["Après"] == "Updated after restart"
+    if event == "edited":
+        assert values["Avant"] == "Persisted before restart"
+        assert values["Après"] == "Updated after restart"
+    elif event == "deleted":
+        assert values["Contenu supprimé"] == "Persisted before restart"
+    else:
+        assert values["Messages supprimés"] == "1"
+        assert values["Contenus disponibles"] == "1"
 
 
 def test_storage_failures_do_not_expose_private_data_in_console(monkeypatch, caplog):

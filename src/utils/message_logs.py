@@ -15,17 +15,29 @@ class MessageSnapshot:
     author_name: str | None = None
     content: str | None = None
     attachments: tuple[tuple[int, str, str], ...] | None = None
+    # None also covers encrypted snapshots written before origin tracking existed.
+    automated: bool | None = None
+
+    @property
+    def is_human(self) -> bool:
+        return self.author_id is not None and self.automated is False
 
     @classmethod
     def from_message(cls, message: discord.Message):
         return cls(
             message.author.id, str(message.author), message.content,
             tuple((item.id, item.filename, item.url) for item in message.attachments),
+            automated=bool(message.author.bot or message.webhook_id is not None or message.application_id is not None),
         )
 
     @classmethod
     def from_update(cls, data: dict, before: "MessageSnapshot"):
         author = data.get("author", {})
+        automated = before.automated
+        if author.get("bot", False) or data.get("webhook_id") is not None or data.get("application_id") is not None:
+            automated = True
+        elif automated is None and "id" in author:
+            automated = False
         attachments = before.attachments
         if "attachments" in data:
             attachments = tuple(
@@ -35,7 +47,7 @@ class MessageSnapshot:
         return cls(
             int(author["id"]) if "id" in author else before.author_id,
             author.get("username", before.author_name),
-            data.get("content", before.content), attachments,
+            data.get("content", before.content), attachments, automated,
         )
 
     def author_text(self) -> str:
