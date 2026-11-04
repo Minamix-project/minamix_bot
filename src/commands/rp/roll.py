@@ -12,7 +12,7 @@ def prepare_output(output: str) -> tuple[str, discord.File | None]:
     if len(output.encode("utf-16-le")) // 2 <= 4096:
         return output, None
     # Summarize the already rolled values; never reroll to produce the summary.
-    summary = re.sub(r"`\[[^\n]*\]`", "…", output)
+    summary = re.sub(r"`\[[^`\n]*\]`", "…", output)
     encoded = summary.encode("utf-16-le")
     if len(encoded) // 2 > 3500:
         summary = encoded[:7000].decode("utf-16-le", errors="ignore") + "\n… Suite dans le fichier joint."
