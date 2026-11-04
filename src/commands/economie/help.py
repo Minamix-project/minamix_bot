@@ -92,6 +92,8 @@ _MESSAGE_HISTORY_ACCESS = (
 _SYSTEM = (
     "`/config` — Afficher les salons configurés\n"
     "`/setlogs <channel>` — Définir les logs généraux\n"
+    "`/setdevlog <channel>` — Choisir le salon du devlog du bot\n"
+    "`/devlog [version] [preview]` — Publier ou prévisualiser les versions GitHub ; correctifs regroupés\n"
     "`/setafklogs <channel>` — Définir les logs d'absence\n"
     "`/setwarnlogs <channel>` — Définir les logs d'avertissement\n"
     "`/setrpchannel <channel>` — Définir le salon des annonces RP\n"
