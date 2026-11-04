@@ -7,6 +7,9 @@ from src.utils.dice import get_help as get_dice_help
 from src.utils.permissions import is_admin
 
 
+ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation", "system", "message_history"})
+
+
 _GENERAL = (
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
@@ -81,9 +84,8 @@ _MESSAGE_HISTORY_ADMIN = (
 
 _MESSAGE_HISTORY_ACCESS = (
     "Réponses privées ; accès au salon d'origine vérifié. "
-    "Par défaut, les commandes sont visibles avec « Gérer le serveur ». "
-    "Les modérateurs disposant de « Gérer les messages » peuvent être autorisés "
-    "dans Paramètres du serveur → Intégrations → commandes du bot."
+    "Toutes les commandes de cette rubrique sont réservées aux membres ayant "
+    "« Administrateur » ou « Gérer le serveur »."
 )
 
 _SYSTEM = (
@@ -145,12 +147,10 @@ async def register(bot):
                 discord.SelectOption(label="Admin · Modération", value="moderation", emoji="🛡️"),
                 discord.SelectOption(label="Admin · Configuration", value="system", emoji="⚙️"),
             ])
-        if admin or interaction.permissions.manage_messages:
+        if admin:
             options.append(discord.SelectOption(label="Admin · Suivi des messages", value="message_history", emoji="📋"))
 
-        history_help = _MESSAGE_HISTORY
-        if admin:
-            history_help += "\n\n**Gestion de l'historique — administration**\n" + _MESSAGE_HISTORY_ADMIN
+        history_help = _MESSAGE_HISTORY + "\n\n**Gestion de l'historique — administration**\n" + _MESSAGE_HISTORY_ADMIN
         history_help += "\n\n" + _MESSAGE_HISTORY_ACCESS
 
         pages = {
@@ -169,7 +169,14 @@ async def register(bot):
         view = HelpView(interaction.user.id)
 
         async def callback(inter: Interaction):
-            title, description, color = pages[select.values[0]]
+            category = select.values[0]
+            if category in ADMIN_HELP_CATEGORIES and not is_admin(inter.user):
+                await inter.response.send_message(
+                    "❌ Cette rubrique est réservée aux membres ayant « Administrateur » ou « Gérer le serveur ».",
+                    ephemeral=True,
+                )
+                return
+            title, description, color = pages[category]
             embed = discord.Embed(title=title, description=description, color=color)
             set_bot_footer(embed, inter)
             await inter.response.edit_message(embed=embed, view=view)

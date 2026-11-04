@@ -237,8 +237,8 @@ size bound; oversized snapshots are rejected without storing a partial body.
 | `/messagehistory configure [enabled] [retention_days] [max_entries] [confirm]` | Change retention/capacity; disabling erases stored history — admin |
 | `/messagehistory purge <channel> [message_id] [confirm]` | Erase retained versions for one channel or message — admin |
 
-Consultation requires Manage Messages (or the existing administrative access
-rule), plus View Channel and Read Message History in the source channel for both
+All message-history commands require **Manage Server** or **Administrator**,
+plus View Channel and Read Message History in the source channel for both
 the caller and bot. Private threads additionally require membership or Manage
 Threads. Source access is checked again on every button interaction. Pages are
 loaded afresh so purged/expired records cannot be downloaded from cached views;
@@ -247,14 +247,12 @@ channel when running the command in a different channel. No decrypted message
 body is written to console logs or the administrative audit trail.
 
 Discord command visibility defaults to **Manage Server**, matching the bot's
-administrative convention and the runtime access granted to that permission.
-Administrators can grant `/messagehistory` access to a moderator role under
-Server Settings → Integrations → the bot's command permissions. Such moderators
-still need Manage Messages and source-channel access at runtime; import,
-configuration, and purge remain administrative actions. `/help` lists these
-commands under **Admin · Suivi des messages**, with management commands shown
-to administrators. Command permission changes take effect after deployment and
-the bot's normal guild-command synchronization.
+administrative runtime checks and help visibility. **Manage Messages alone does
+not grant access** to any history command, including consultation. No role name
+or role ID is required. `/help` lists all six commands under **Admin · Suivi des
+messages** for members with Manage Server or Administrator. Every administrative
+help page rechecks these permissions when selected. Command permission changes
+take effect after deployment and the bot's normal guild-command synchronization.
 
 The public Economy help page documents `/pay <user> <amount> <reason>` for player
 transfers. The Roleplay page also references `/pay` for NAX transfers between

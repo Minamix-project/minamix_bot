@@ -30,4 +30,5 @@ def test_registered_command_permissions():
         command = registered[name]
         assert command.default_permissions is not None
         assert command.default_permissions.manage_guild
+        assert command.to_dict(bot.tree)["default_member_permissions"] == discord.Permissions(manage_guild=True).value
         assert command.checks

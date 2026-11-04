@@ -1,7 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
-import inspect
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -89,20 +88,20 @@ def test_concurrent_initializers_share_one_complete_key(tmp_path):
     assert list(path.parent.iterdir()) == [path]
 
 
-def moderator_setup(monkeypatch, *, allowed=True):
+def admin_setup(monkeypatch, *, allowed=True):
     monkeypatch.setattr(command, "GUILD_IDS", {1})
     member = Mock(spec=discord.Member)
     member.id = 42
-    member.guild_permissions = discord.Permissions(manage_messages=True)
+    member.guild_permissions = discord.Permissions(manage_guild=True)
     guild = Mock(spec=discord.Guild)
     guild.id = 1
     channel = Mock(spec=discord.TextChannel)
     channel.id, channel.guild = 2, guild
-    permissions = discord.Permissions(view_channel=allowed, read_message_history=allowed, manage_messages=allowed)
+    permissions = discord.Permissions(view_channel=allowed, read_message_history=allowed)
     channel.permissions_for.return_value = permissions
     guild.get_channel_or_thread.return_value = channel
     interaction = SimpleNamespace(
-        guild_id=1, guild=guild, user=member, permissions=discord.Permissions(manage_messages=True),
+        guild_id=1, guild=guild, user=member, permissions=discord.Permissions(manage_guild=True),
         response=SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()), channel_id=2,
         client=SimpleNamespace(user=SimpleNamespace(display_avatar=SimpleNamespace(url="https://example.com/bot.png"))),
@@ -111,7 +110,7 @@ def moderator_setup(monkeypatch, *, allowed=True):
 
 
 def test_source_channel_permissions_are_required_before_access(monkeypatch):
-    interaction, channel = moderator_setup(monkeypatch)
+    interaction, channel = admin_setup(monkeypatch)
     assert asyncio.run(command.source_channel(interaction, channel.id)) is channel
     channel.permissions_for.return_value = discord.Permissions.none()
     with pytest.raises(discord.app_commands.CheckFailure):
@@ -121,10 +120,11 @@ def test_source_channel_permissions_are_required_before_access(monkeypatch):
         asyncio.run(command.source_channel(interaction, channel.id))
 
 
-def test_manage_server_without_manage_messages_can_discover_and_use_history(monkeypatch):
-    interaction, channel = moderator_setup(monkeypatch)
-    interaction.user.guild_permissions = discord.Permissions(manage_guild=True)
-    interaction.permissions = discord.Permissions(manage_guild=True)
+@pytest.mark.parametrize("permissions", [discord.Permissions(manage_guild=True), discord.Permissions(administrator=True)])
+def test_admin_permissions_allow_history_without_manage_messages(monkeypatch, permissions):
+    interaction, channel = admin_setup(monkeypatch)
+    interaction.user.guild_permissions = permissions
+    interaction.permissions = permissions
     channel.permissions_for.return_value = discord.Permissions(view_channel=True, read_message_history=True)
     group = command.MessageHistoryCommands()
     assert group.default_permissions.manage_guild
@@ -137,22 +137,34 @@ def test_manage_server_without_manage_messages_can_discover_and_use_history(monk
         asyncio.run(command.source_channel(interaction, channel.id))
 
 
-def test_moderators_granted_command_access_still_cannot_manage_retention(monkeypatch):
-    interaction, _channel = moderator_setup(monkeypatch)
+@pytest.mark.parametrize("command_name", ["recent", "view", "status", "configure", "purge", "import"])
+def test_manage_messages_alone_cannot_execute_any_history_command(monkeypatch, command_name):
+    interaction, channel = admin_setup(monkeypatch)
+    interaction.user.guild_permissions = discord.Permissions(manage_messages=True)
+    interaction.permissions = discord.Permissions(manage_messages=True)
     group = command.MessageHistoryCommands()
-    assert asyncio.run(group.interaction_check(interaction))
-    for name in ("configure", "purge", "import"):
-        admin_checks = [check for check in group.get_command(name).checks if not inspect.iscoroutinefunction(check)]
-        assert admin_checks
-        assert not all(check(interaction) for check in admin_checks)
-    interaction.user.guild_permissions = discord.Permissions.none()
-    interaction.permissions = discord.Permissions.none()
     with pytest.raises(discord.app_commands.CheckFailure):
-        asyncio.run(group.interaction_check(interaction))
+        asyncio.run(group.get_command(command_name)._check_can_run(interaction))
+    with pytest.raises(discord.app_commands.CheckFailure):
+        asyncio.run(command.source_channel(interaction, channel.id))
+    interaction.guild.get_channel_or_thread.assert_not_called()
+
+
+def test_history_navigation_rejects_an_admin_demoted_to_manage_messages(monkeypatch):
+    interaction, channel = admin_setup(monkeypatch)
+    store = SimpleNamespace(records=AsyncMock())
+
+    async def scenario():
+        view = command.HistoryView(interaction, store, channel.id)
+        interaction.user.guild_permissions = discord.Permissions(manage_messages=True)
+        interaction.permissions = discord.Permissions(manage_messages=True)
+        assert not await view.interaction_check(interaction)
+        store.records.assert_not_awaited()
+    asyncio.run(scenario())
 
 
 def test_private_thread_membership_is_checked(monkeypatch):
-    interaction, _channel = moderator_setup(monkeypatch)
+    interaction, _channel = admin_setup(monkeypatch)
     thread = Mock(spec=discord.Thread)
     thread.guild, thread.id = interaction.guild, 2
     thread.is_private.return_value = True
@@ -166,7 +178,7 @@ def test_private_thread_membership_is_checked(monkeypatch):
 
 
 def test_view_rechecks_permissions_on_navigation_and_does_not_load_hidden_content(monkeypatch):
-    interaction, _channel = moderator_setup(monkeypatch, allowed=False)
+    interaction, _channel = admin_setup(monkeypatch, allowed=False)
     store = SimpleNamespace(records=AsyncMock())
 
     async def scenario():
@@ -177,7 +189,7 @@ def test_view_rechecks_permissions_on_navigation_and_does_not_load_hidden_conten
 
 
 def test_view_loads_pages_fresh_and_expired_versions_are_not_exported(monkeypatch):
-    interaction, _channel = moderator_setup(monkeypatch)
+    interaction, _channel = admin_setup(monkeypatch)
     entry = HistoryEntry(1, 1, 2, 3, 42, "edited", 2_000_000_000, 2_000_000_000, 2_002_592_000, snapshot())
     store = SimpleNamespace(records=AsyncMock(side_effect=[[entry], [], []]))
 
@@ -194,7 +206,7 @@ def test_view_loads_pages_fresh_and_expired_versions_are_not_exported(monkeypatc
 
 
 def test_recent_menu_opens_versions_without_copying_message_ids(monkeypatch):
-    interaction, _channel = moderator_setup(monkeypatch)
+    interaction, _channel = admin_setup(monkeypatch)
     interaction.edit_original_response = AsyncMock()
     entry = HistoryEntry(1, 1, 2, 3, 42, "edited", 2_000_000_000, 2_000_000_000, 2_002_592_000, snapshot())
     store = SimpleNamespace(records=AsyncMock(return_value=[entry]))
@@ -216,7 +228,7 @@ def test_recent_menu_opens_versions_without_copying_message_ids(monkeypatch):
 
 
 def test_destructive_commands_require_explicit_confirmation(monkeypatch):
-    interaction, channel = moderator_setup(monkeypatch)
+    interaction, channel = admin_setup(monkeypatch)
     store = Mock()
     monkeypatch.setattr(command, "history_cog", lambda _interaction: SimpleNamespace(store=store))
     group = command.MessageHistoryCommands()

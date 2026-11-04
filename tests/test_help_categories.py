@@ -32,7 +32,7 @@ async def help_session(permissions):
 
 @pytest.mark.parametrize("permissions,visible,management", [
     (discord.Permissions.none(), False, False),
-    (discord.Permissions(manage_messages=True), True, False),
+    (discord.Permissions(manage_messages=True), False, False),
     (discord.Permissions(manage_guild=True), True, True),
     (discord.Permissions(administrator=True), True, True),
 ])
@@ -40,6 +40,8 @@ def test_history_help_uses_admin_convention_and_respects_access(permissions, vis
     async def scenario():
         async with help_session(permissions) as (_bot, interaction, select):
             options = {option.value: option.label for option in select.options}
+            for category in help_command.ADMIN_HELP_CATEGORIES:
+                assert (category in options) is visible
             assert ("message_history" in options) is visible
             if not visible:
                 return
@@ -54,6 +56,21 @@ def test_history_help_uses_admin_convention_and_respects_access(permissions, vis
                 assert (f"/messagehistory {name}" in embed.description) is management
             assert "Gérer le serveur" in embed.description
             assert len(embed.description) <= 4096
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("category", sorted(help_command.ADMIN_HELP_CATEGORIES))
+def test_admin_help_rechecks_access_after_permission_loss(category):
+    async def scenario():
+        async with help_session(discord.Permissions(manage_guild=True)) as (_bot, interaction, select):
+            interaction.user.guild_permissions = discord.Permissions(manage_messages=True)
+            interaction.permissions = discord.Permissions(manage_messages=True)
+            select._values = [category]
+            await select.callback(interaction)
+            interaction.response.edit_message.assert_not_awaited()
+            kwargs = interaction.response.send_message.await_args.kwargs
+            assert kwargs["ephemeral"]
+            assert "Gérer le serveur" in interaction.response.send_message.await_args.args[0]
     asyncio.run(scenario())
 
 
