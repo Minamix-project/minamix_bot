@@ -65,6 +65,13 @@ _MODERATION = (
     "`/listecoignore` — Lister les salons économiques ignorés"
 )
 
+_MESSAGE_HISTORY = (
+    "`/messagehistory recent [channel] [user] [event]` — Voir les changements et ouvrir les versions depuis le menu\n"
+    "`/messagehistory view <message_id> [channel]` — Consulter les versions conservées d'un message\n"
+    "`/messagehistory status` — Voir la conservation et les limites\n\n"
+    "Réponses privées, réservées à la modération et aux salons auxquels tu as accès."
+)
+
 _SYSTEM = (
     "`/config` — Afficher les salons configurés\n"
     "`/setlogs <channel>` — Définir les logs généraux\n"
@@ -75,7 +82,10 @@ _SYSTEM = (
     "`/health` — Vérifier Discord et MySQL\n"
     "`/backupstatus` — Vérifier le dernier dump et sa restauration\n"
     "`/audit [...]` — Consulter les actions administratives\n"
-    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques"
+    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques\n"
+    "`/messagehistory import [channel] [limit]` — Importer des messages récents\n"
+    "`/messagehistory configure [...]` — Régler la conservation de l'historique\n"
+    "`/messagehistory purge <channel> [...]` — Effacer des versions stockées (confirmation requise)"
 )
 
 
@@ -123,6 +133,8 @@ async def register(bot):
                 discord.SelectOption(label="Admin · Modération", value="moderation", emoji="🛡️"),
                 discord.SelectOption(label="Admin · Configuration", value="system", emoji="⚙️"),
             ])
+        if admin or interaction.permissions.manage_messages:
+            options.append(discord.SelectOption(label="Suivi des messages", value="message_history", emoji="📋"))
 
         pages = {
             "general": ("👋 Pour commencer", _GENERAL, discord.Color.blurple()),
@@ -132,6 +144,7 @@ async def register(bot):
             "admin_economy": ("🔒 Administration · Économie", _ADMIN_ECONOMY, discord.Color.red()),
             "moderation": ("🛡️ Administration · Modération", _MODERATION, discord.Color.red()),
             "system": ("⚙️ Administration · Configuration", _SYSTEM, discord.Color.red()),
+            "message_history": ("📋 Suivi des messages", _MESSAGE_HISTORY, discord.Color.blurple()),
         }
 
         select = Select(placeholder="Choisis une catégorie…", options=options)

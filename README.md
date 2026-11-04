@@ -195,6 +195,88 @@ Anti-spam logs message deletion and ban results separately. Technical failures
 receive a short reference and can be sent to the channel configured with
 `/seterrorlogs`.
 
+The general log channel configured with `/setlogs` also receives message edits,
+single deletions, and bulk deletions from allowed guilds, including threads.
+Records show the message author (not an inferred deleting moderator), source
+channel, message ID, creation time, event time, available content, and attachment
+names and URLs. Edits show before/after versions and a link to the message.
+Attachment-only changes are recorded; link previews and pin updates are ignored.
+Long records include a UTF-8 text file with the unabridged content. Bulk deletions
+produce one summary and a text transcript. The bot needs View Channel, Send
+Messages, Embed Links, and Attach Files in the destination. If attaching a file is
+forbidden, the bot sends the summary with an explicit notice instead. Mentions in
+logs never ping users or roles. The bot's own cached messages are excluded to
+avoid logging its own log deletions.
+
+Previous content is resolved from Discord's cache and encrypted MySQL history,
+so tracked messages survive bot restarts. Collection starts when `/setlogs` is
+configured, unless an administrator disables it. The bot's own messages and DMs
+are excluded. Content that was never received/imported or has expired is marked
+unavailable; Discord cannot supply a deleted message or an earlier edit version.
+Updates use the Gateway event's content rather than fetching a potentially newer
+version. Attachment URLs may expire; attachment binaries are not downloaded or
+reuploaded. General logs must be restricted to the intended moderation team.
+
+### Persistent message history
+
+Defaults are **30 days, 5,000 retained versions per guild, and 10 versions per
+message**, whichever limit is reached first. Administrators can reduce retention
+to 1–30 days and set a guild cap of 100–20,000 versions. New writes evict the
+oldest versions immediately when a capacity limit is reached. Expired content
+is excluded from queries immediately and physically removed every 15 minutes
+while the bot is online, including at startup. Removed/disallowed guilds are
+also cleared during maintenance. Each encrypted snapshot has a 64 KiB plaintext
+size bound; oversized snapshots are rejected without storing a partial body.
+
+| Command | Description |
+| --- | --- |
+| `/messagehistory recent [channel] [user] [event]` | Private, paginated view of edits/deletions; optional author and event filters |
+| `/messagehistory view <message_id> [channel]` | Browse retained versions and retrieve the full text; accepts an ID or message link |
+| `/messagehistory status` | Show retention, usage, capacity, and collection status |
+| `/messagehistory import [channel] [limit]` | Import up to 1,000 recent existing messages from one channel — admin |
+| `/messagehistory configure [enabled] [retention_days] [max_entries] [confirm]` | Change retention/capacity; disabling erases stored history — admin |
+| `/messagehistory purge <channel> [message_id] [confirm]` | Erase retained versions for one channel or message — admin |
+
+Consultation requires Manage Messages (or the existing administrative access
+rule), plus View Channel and Read Message History in the source channel for both
+the caller and bot. Private threads additionally require membership or Manage
+Threads. Source access is checked again on every button interaction. Pages are
+loaded afresh so purged/expired records cannot be downloaded from cached views;
+responses are ephemeral and views expire after two minutes. Specify the source
+channel when running the command in a different channel. No decrypted message
+body is written to console logs or the administrative audit trail.
+
+Import is explicit, newest-first, bounded to the retention window, and limited
+to one operation per guild. It scans 200 messages by default, up to 1,000, with
+a two-minute deadline and a one-minute command cooldown. Existing tracked
+messages are never overwritten, and an import cannot resurrect data after a
+purge or configuration change. Imported snapshots expire relative to their
+original creation time; importing does not renew retention. Lowering retention
+or capacity applies immediately; increasing them does not extend existing
+expiry dates. Disabling or purging requires `confirm:true`.
+
+Content, usernames, and attachment names/URLs are authenticated-encrypted with
+[Fernet](https://cryptography.io/en/stable/fernet/). Guild/channel/message/author
+IDs and event/expiry metadata remain queryable in MySQL and are authenticated
+inside the encrypted payload to detect ciphertext moved across messages or guilds.
+The encryption key is independent of the Discord token and database credentials.
+Compose creates it automatically in the **`message_history_keys`** volume at
+`/app/history-keys/content.key`, owned by the bot user with mode `0600`. This volume
+survives container recreation; a rebuild is required to add it to an existing
+installation. For a direct Python run, the default path is
+`history-keys/content.key`. `MESSAGE_HISTORY_KEY_FILE` can select a dedicated
+owner-only secret file, or `MESSAGE_HISTORY_KEY` can provide a Fernet key through
+the deployment's secret environment. Key files are excluded from Git and Docker
+build contexts. Startup refuses a missing/wrong key when encrypted data exists.
+
+Back up the key separately in protected offline storage and restore it alongside
+the database; database backups alone cannot decrypt this history. Losing the
+key makes the stored contents unreadable. Do not delete the key volume when
+recreating the stack. Database purges cannot erase older SQL backups: encrypted
+copies age out under `BACKUP_RETENTION_DAYS` (14 days by default). Discord log
+messages, transcripts, and downloaded exports follow their own retention and
+remain until removed by administrators; the database cleaner does not remove them.
+
 ### Roleplay
 
 | Command | Description |
@@ -211,6 +293,21 @@ receive a short reference and can be sent to the channel configured with
 | `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |
+
+Dice rolls support 200 base dice per group, up to 20 repeated sets and four
+semicolon-separated expressions. A shared budget of 10,000 actual random draws
+per command includes every reroll and explosion, across all groups, sets, and
+aliases. Exceeding that budget returns an explicit error instead of a partial
+result. Fate, Warhammer, Godbound, and Wrath & Glory use the same group limit.
+Expressions are limited to 1,000 characters, numeric literals to nine digits,
+and dice to 1,000,000 sides. Excess sets and expressions are rejected explicitly.
+
+When full results exceed the embed description limit, `/roll` sends a compact
+summary and one UTF-8 text attachment containing the exact original results;
+creating the summary never rerolls the dice. Private rolls keep both the summary
+and attachment ephemeral. Short rolls remain a single embed. Each member can
+invoke `/roll` five times per ten seconds per guild. `/roll help` describes the
+roll limits and long-output behavior in French.
 
 ## Backups
 

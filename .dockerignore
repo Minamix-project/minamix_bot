@@ -8,6 +8,7 @@
 __pycache__
 *.py[cod]
 backups
+history-keys
 backup_test_status
 tests
 *.orig

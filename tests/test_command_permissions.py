@@ -12,11 +12,16 @@ def test_registered_command_permissions():
     asyncio.run(load_modules(bot, "src/commands", "CMD"))
     registered = {command.name: command for command in bot.tree.get_commands()}
 
-    assert len(registered) == 55
+    assert len(registered) == 56
     assert "reminder" in registered
     assert "rappel" not in registered
     assert "remind" not in registered
     assert {command.name for command in registered["reminder"].commands} == {"create", "list", "edit", "delete"}
+    history = registered["messagehistory"]
+    assert history.default_permissions.manage_messages
+    assert {command.name for command in history.commands} == {"recent", "view", "status", "configure", "purge", "import"}
+    for name in ("configure", "purge", "import"):
+        assert history.get_command(name).checks
     assert not ADMIN_COMMANDS - registered.keys()
 
     for name in ADMIN_COMMANDS:

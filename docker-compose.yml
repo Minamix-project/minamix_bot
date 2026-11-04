@@ -48,6 +48,7 @@ services:
     volumes:
       - ./backups:/app/backups:ro
       - ./backup_test_status:/app/backup_test_status:ro
+      - message_history_keys:/app/history-keys
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -182,3 +183,4 @@ services:
 
 volumes:
   mysql_data:
+  message_history_keys:

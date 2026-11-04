@@ -6,8 +6,8 @@ from src.utils.embed import set_bot_footer
 
 
 async def register(bot):
-    @bot.tree.command(name="setlogs", description="Définir le channel de logs (Admin seulement)")
-    @app_commands.describe(channel="Channel où envoyer les logs")
+    @bot.tree.command(name="setlogs", description="Définir le salon des logs généraux et des messages (Admin seulement)")
+    @app_commands.describe(channel="Salon des logs, dont les modifications et suppressions de messages")
     @admin_only()
     async def setlogs(interaction: Interaction, channel: TextChannel):
         db = await get_db_connection()
@@ -22,8 +22,15 @@ async def register(bot):
         db.close()
 
         embed = discord.Embed(
-            title="✅ Channel de logs défini",
-            description=f"Les logs seront envoyés dans {channel.mention}.",
+            title="✅ Salon des logs généraux défini",
+            description=(
+                f"Les logs seront envoyés dans {channel.mention}, y compris les modifications "
+                "et suppressions de messages avec leur contenu disponible.\n"
+                "Le suivi conserve les versions de façon chiffrée, avec une durée et des limites "
+                "consultables dans `/messagehistory status`. Réservez ce salon à la modération.\n"
+                "Le bot doit pouvoir voir ce salon, y envoyer des messages, intégrer des liens "
+                "et joindre des fichiers pour les contenus longs et les suppressions groupées."
+            ),
             color=discord.Color.green()
         )
         set_bot_footer(embed, interaction)

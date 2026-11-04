@@ -10,7 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN groupadd --gid 10001 minamix \
-    && useradd --uid 10001 --gid minamix --no-create-home --shell /usr/sbin/nologin minamix
+    && useradd --uid 10001 --gid minamix --no-create-home --shell /usr/sbin/nologin minamix \
+    && install -d -m 0700 -o minamix -g minamix /app/history-keys
 
 COPY --chown=minamix:minamix . .
 

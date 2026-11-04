@@ -1,8 +1,15 @@
 import random
 import re
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Optional
 
 MAX_DICE = 200
+MAX_TOTAL_DRAWS = 10000
+MAX_SIDES = 1000000
+MAX_EXPRESSION_LENGTH = 1000
+MAX_SETS = 20
+MAX_PARTS = 4
 EXPLODE_CAP = 100
 REROLL_CAP = 100
 
@@ -11,8 +18,42 @@ class ParseError(Exception):
     pass
 
 
+class RollLimitError(ParseError):
+    pass
+
+
+@dataclass
+class RollBudget:
+    draws: int = 0
+
+    def consume(self):
+        if self.draws >= MAX_TOTAL_DRAWS:
+            raise RollLimitError(
+                f"Maximum {MAX_TOTAL_DRAWS} tirages par commande, relances et explosions comprises. "
+                "Réduis le nombre de dés ou de séries."
+            )
+        self.draws += 1
+
+
+_ROLL_BUDGET: ContextVar[RollBudget | None] = ContextVar("dice_roll_budget", default=None)
+
+
 def _d(sides: int) -> int:
     return random.randint(1, max(1, sides))
+
+
+def _draw(sides: int) -> int:
+    budget = _ROLL_BUDGET.get()
+    if budget is not None:
+        budget.consume()
+    return _d(sides)
+
+
+def _validate_count(count: int):
+    if count < 1:
+        raise ParseError("Il faut lancer au moins 1 dé.")
+    if count > MAX_DICE:
+        raise ParseError(f"Maximum {MAX_DICE} dés par groupe.")
 
 
 # ─── Earthdawn step table ─────────────────────────────────────────────────────
@@ -117,12 +158,11 @@ def _roll_single(expr: str) -> str:
     sides = int(dice_m.group(2))
     rem = dice_m.group(3).strip()
 
-    if n_dice < 1:
-        n_dice = 1
-    if n_dice > MAX_DICE:
-        raise ParseError(f"Maximum {MAX_DICE} dés.")
+    _validate_count(n_dice)
     if sides < 1:
         raise ParseError("Le dé doit avoir au moins 1 face.")
+    if sides > MAX_SIDES:
+        raise ParseError(f"Maximum {MAX_SIDES} faces par dé.")
 
     # Parse modifiers (order matters)
     inf_explode = False
@@ -201,16 +241,16 @@ def _roll_single(expr: str) -> str:
     # Roll
     rolls = []
     for _ in range(n_dice):
-        r = _d(sides)
+        r = _draw(sides)
         if reroll_val is not None:
             if inf_reroll:
                 count = 0
                 while r <= reroll_val and count < REROLL_CAP:
-                    r = _d(sides)
+                    r = _draw(sides)
                     count += 1
             else:
                 if r <= reroll_val:
-                    r = _d(sides)
+                    r = _draw(sides)
         rolls.append(r)
 
     # Exploding
@@ -221,7 +261,7 @@ def _roll_single(expr: str) -> str:
         while to_explode and count < EXPLODE_CAP:
             next_explode = []
             for _ in to_explode:
-                new_r = _d(sides)
+                new_r = _draw(sides)
                 extra.append(new_r)
                 if inf_explode and new_r >= explode_val:
                     next_explode.append(new_r)
@@ -309,7 +349,7 @@ def _roll_single(expr: str) -> str:
 def _roll_dndstats() -> str:
     sets = []
     for _ in range(6):
-        rolls = [_d(6) for _ in range(4)]
+        rolls = [_draw(6) for _ in range(4)]
         kept = sorted(rolls, reverse=True)[:3]
         total = sum(kept)
         dropped = min(rolls)
@@ -318,8 +358,9 @@ def _roll_dndstats() -> str:
 
 
 def _roll_fate(n: int) -> str:
+    _validate_count(n)
     symbols = {-1: "**-**", 0: "**□**", 1: "**+**"}
-    rolls = [random.choice([-1, 0, 1]) for _ in range(n)]
+    rolls = [_draw(3) - 2 for _ in range(n)]
     total = sum(rolls)
     display = " ".join(symbols[r] for r in rolls)
     sign = "+" if total >= 0 else ""
@@ -327,7 +368,7 @@ def _roll_fate(n: int) -> str:
 
 
 def _roll_age() -> str:
-    d1, dragon, d2 = _d(6), _d(6), _d(6)
+    d1, dragon, d2 = _draw(6), _draw(6), _draw(6)
     total = d1 + dragon + d2
     return (
         f"🎲 AGE `[{d1} **{dragon}** {d2}]` → **{total}**\n"
@@ -340,9 +381,8 @@ def _roll_wng(args: str) -> str:
     if not m:
         raise ParseError("Usage : `wng <dés>` — ex: `wng 6`")
     n = int(m.group(1))
-    if n > MAX_DICE:
-        raise ParseError(f"Maximum {MAX_DICE} dés.")
-    rolls = [_d(6) for _ in range(n)]
+    _validate_count(n)
+    rolls = [_draw(6) for _ in range(n)]
     wrath = rolls[0]
     pool = rolls[1:]
 
@@ -365,7 +405,7 @@ def _roll_dh(args: str) -> str:
     if not m:
         raise ParseError("Usage : `dh <compétence>` — ex: `dh 45`")
     skill = int(m.group(1))
-    roll = _d(100)
+    roll = _draw(100)
     success = roll <= skill
     icon = "✅" if success else "❌"
     result = f"🎲 Dark Heresy `[{roll}]` vs {skill} → {icon} {'Succès' if success else 'Échec'}"
@@ -377,7 +417,8 @@ def _roll_dh(args: str) -> str:
 def _roll_gb(args: str) -> str:
     m = re.match(r'(\d+)', args.strip())
     n = int(m.group(1)) if m else 1
-    rolls = [_d(6) for _ in range(n)]
+    _validate_count(n)
+    rolls = [_draw(6) for _ in range(n)]
     total = sum(rolls)
     # Godbound damage chart
     if total <= 3:
@@ -397,7 +438,8 @@ def _roll_gb(args: str) -> str:
 # ─── Warhammer Fantasy ────────────────────────────────────────────────────────
 
 def _roll_wh(n: int, target: int) -> str:
-    rolls = [_d(100) for _ in range(n)]
+    _validate_count(n)
+    rolls = [_draw(100) for _ in range(n)]
     successes = sum(1 for r in rolls if r <= target)
     kept_str = " ".join(f"**{r}**" if r <= target else str(r) for r in rolls)
     return f"🎲 {n}d100 (seuil {target}) `[{kept_str}]` → **{successes}** succès"
@@ -407,6 +449,21 @@ def _roll_wh(n: int, target: int) -> str:
 
 def roll(expression: str) -> tuple[str, bool]:
     """Returns (output_text, is_private)."""
+    if len(expression) > MAX_EXPRESSION_LENGTH:
+        raise ParseError(f"Maximum {MAX_EXPRESSION_LENGTH} caractères par commande.")
+    if not expression.strip():
+        raise ParseError("Indique un lancer, par exemple `2d6`.")
+    # Bound integer conversion and arithmetic before parsing aliases/modifiers.
+    if any(len(number) > 9 for number in re.findall(r"\d+", expression.split("!", 1)[0])):
+        raise ParseError("Les nombres sont limités à 9 chiffres.")
+    token = _ROLL_BUDGET.set(RollBudget())
+    try:
+        return _evaluate(expression)
+    finally:
+        _ROLL_BUDGET.reset(token)
+
+
+def _evaluate(expression: str) -> tuple[str, bool]:
     expression = expression.strip()
 
     # Private flag
@@ -422,8 +479,11 @@ def roll(expression: str) -> tuple[str, bool]:
         comment = expression[idx + 1:].strip()
         expression = expression[:idx].strip()
 
-    # Multiple rolls (semicolons, max 4)
-    parts = [p.strip() for p in expression.split(";")][:4]
+    parts = [p.strip() for p in expression.split(";") if p.strip()]
+    if not parts:
+        raise ParseError("Indique un lancer, par exemple `2d6`.")
+    if len(parts) > MAX_PARTS:
+        raise ParseError(f"Maximum {MAX_PARTS} lancers séparés par des points-virgules.")
 
     lines = []
     for part in parts:
@@ -431,6 +491,8 @@ def roll(expression: str) -> tuple[str, bool]:
             continue
         try:
             lines.append(_roll_part(part))
+        except RollLimitError:
+            raise
         except ParseError as e:
             lines.append(f"❌ {e}")
 
@@ -477,12 +539,16 @@ def _roll_part(expr: str) -> str:
     # Multiple sets: "N XdY ..."
     m = re.match(r'^(\d+)\s+(\d*d\d+.*)', low)
     if m:
-        n_sets = min(int(m.group(1)), 20)
+        n_sets = int(m.group(1))
+        if not 1 <= n_sets <= MAX_SETS:
+            raise ParseError(f"Le nombre de séries doit être compris entre 1 et {MAX_SETS}.")
         sub = m.group(2)
         results = []
         for i in range(n_sets):
             try:
                 results.append(f"`#{i+1}` {_roll_single(sub)}")
+            except RollLimitError:
+                raise
             except ParseError as e:
                 results.append(f"❌ {e}")
                 break
@@ -573,5 +639,9 @@ def get_help() -> str:
         "`dndstats` 6×4d6 drop lowest · `attack/skill/save ±N`\n"
         "`+d20` avantage · `-d20` désavantage\n\n"
         "**Systèmes**\n"
-        "`wng N` Wrath & Glory · `dh N` Dark Heresy 2e · `gb N` Godbound"
+        "`wng N` Wrath & Glory · `dh N` Dark Heresy 2e · `gb N` Godbound\n\n"
+        "**Limites**\n"
+        f"{MAX_DICE} dés par groupe · {MAX_SETS} séries · {MAX_PARTS} lancers par commande\n"
+        f"{MAX_TOTAL_DRAWS} tirages au total, relances et explosions comprises\n"
+        "Les résultats longs sont résumés, avec le détail complet en fichier joint."
     )
