@@ -18,7 +18,9 @@ def test_registered_command_permissions():
     assert "remind" not in registered
     assert {command.name for command in registered["reminder"].commands} == {"create", "list", "edit", "delete"}
     history = registered["messagehistory"]
-    assert history.default_permissions.manage_messages
+    assert history.default_permissions.manage_guild
+    assert not history.default_permissions.manage_messages
+    assert history.to_dict(bot.tree)["default_member_permissions"] == discord.Permissions(manage_guild=True).value
     assert {command.name for command in history.commands} == {"recent", "view", "status", "configure", "purge", "import"}
     for name in ("configure", "purge", "import"):
         assert history.get_command(name).checks

@@ -18,6 +18,7 @@ _GENERAL = (
 _ECONOMY = (
     "`/balance` — Consulter ton solde\n"
     "`/work` — Gagner des coins (une fois par semaine)\n"
+    "`/pay <user> <amount> <reason>` — Envoyer des coins ou des NAX à un joueur (choix de la devise)\n"
     "`/shop` — Afficher la boutique du serveur\n"
     "`/buy [numéro]` — Acheter un rôle\n"
     "`/leaderboard` — Afficher le classement avec navigation\n"
@@ -27,7 +28,8 @@ _ECONOMY = (
 
 _RP_PUBLIC = (
     "`/rplist [user]` — Lister des personnages avec navigation\n"
-    "`/rpbourse [user]` — Consulter la bourse Nax d'un personnage"
+    "`/rpbourse [user]` — Consulter la bourse Nax d'un personnage\n"
+    "`/pay <user> <amount> <reason>` — Transférer des NAX entre personnages RP (choisir la devise NAX)"
 )
 
 _RP_MANAGEMENT = (
@@ -48,7 +50,7 @@ _ADMIN_ECONOMY = (
     "`/removenax <user> <montant>` — Retirer des Nax\n"
     "`/economystats` — Afficher les statistiques économiques\n"
     "`/resetbalances` — Remettre les soldes du serveur à zéro\n"
-    "`/economyconfig` — Configurer les gains, délais et plafonds"
+    "`/economyconfig` — Configurer les gains, délais, plafonds et limites des transferts"
 )
 
 _MODERATION = (
@@ -68,8 +70,20 @@ _MODERATION = (
 _MESSAGE_HISTORY = (
     "`/messagehistory recent [channel] [user] [event]` — Voir les changements et ouvrir les versions depuis le menu\n"
     "`/messagehistory view <message_id> [channel]` — Consulter les versions conservées d'un message\n"
-    "`/messagehistory status` — Voir la conservation et les limites\n\n"
-    "Réponses privées, réservées à la modération et aux salons auxquels tu as accès."
+    "`/messagehistory status` — Voir la conservation et les limites"
+)
+
+_MESSAGE_HISTORY_ADMIN = (
+    "`/messagehistory import [channel] [limit]` — Importer des messages récents\n"
+    "`/messagehistory configure [...]` — Régler la conservation de l'historique\n"
+    "`/messagehistory purge <channel> [...]` — Effacer des versions stockées (confirmation requise)"
+)
+
+_MESSAGE_HISTORY_ACCESS = (
+    "Réponses privées ; accès au salon d'origine vérifié. "
+    "Par défaut, les commandes sont visibles avec « Gérer le serveur ». "
+    "Les modérateurs disposant de « Gérer les messages » peuvent être autorisés "
+    "dans Paramètres du serveur → Intégrations → commandes du bot."
 )
 
 _SYSTEM = (
@@ -82,10 +96,7 @@ _SYSTEM = (
     "`/health` — Vérifier Discord et MySQL\n"
     "`/backupstatus` — Vérifier le dernier dump et sa restauration\n"
     "`/audit [...]` — Consulter les actions administratives\n"
-    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques\n"
-    "`/messagehistory import [channel] [limit]` — Importer des messages récents\n"
-    "`/messagehistory configure [...]` — Régler la conservation de l'historique\n"
-    "`/messagehistory purge <channel> [...]` — Effacer des versions stockées (confirmation requise)"
+    "`/seterrorlogs <channel>` — Définir le salon des erreurs techniques"
 )
 
 
@@ -135,7 +146,12 @@ async def register(bot):
                 discord.SelectOption(label="Admin · Configuration", value="system", emoji="⚙️"),
             ])
         if admin or interaction.permissions.manage_messages:
-            options.append(discord.SelectOption(label="Suivi des messages", value="message_history", emoji="📋"))
+            options.append(discord.SelectOption(label="Admin · Suivi des messages", value="message_history", emoji="📋"))
+
+        history_help = _MESSAGE_HISTORY
+        if admin:
+            history_help += "\n\n**Gestion de l'historique — administration**\n" + _MESSAGE_HISTORY_ADMIN
+        history_help += "\n\n" + _MESSAGE_HISTORY_ACCESS
 
         pages = {
             "general": ("👋 Pour commencer", _GENERAL, discord.Color.blurple()),
@@ -146,7 +162,7 @@ async def register(bot):
             "admin_economy": ("🔒 Administration · Économie", _ADMIN_ECONOMY, discord.Color.red()),
             "moderation": ("🛡️ Administration · Modération", _MODERATION, discord.Color.red()),
             "system": ("⚙️ Administration · Configuration", _SYSTEM, discord.Color.red()),
-            "message_history": ("📋 Suivi des messages", _MESSAGE_HISTORY, discord.Color.blurple()),
+            "message_history": ("📋 Administration · Suivi des messages", history_help, discord.Color.red()),
         }
 
         select = Select(placeholder="Choisis une catégorie…", options=options)

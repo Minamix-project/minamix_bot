@@ -198,7 +198,7 @@ class HistoryView(ExpiringView):
 
 
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_messages=True)
+@app_commands.default_permissions(manage_guild=True)
 class MessageHistoryCommands(app_commands.Group):
     def __init__(self):
         super().__init__(name="messagehistory", description="Consulter le suivi privé des messages et gérer sa conservation.")

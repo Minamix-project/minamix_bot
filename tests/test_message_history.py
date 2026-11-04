@@ -1,6 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
+import inspect
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -118,6 +119,36 @@ def test_source_channel_permissions_are_required_before_access(monkeypatch):
     interaction.guild_id = 999
     with pytest.raises(discord.app_commands.CheckFailure):
         asyncio.run(command.source_channel(interaction, channel.id))
+
+
+def test_manage_server_without_manage_messages_can_discover_and_use_history(monkeypatch):
+    interaction, channel = moderator_setup(monkeypatch)
+    interaction.user.guild_permissions = discord.Permissions(manage_guild=True)
+    interaction.permissions = discord.Permissions(manage_guild=True)
+    channel.permissions_for.return_value = discord.Permissions(view_channel=True, read_message_history=True)
+    group = command.MessageHistoryCommands()
+    assert group.default_permissions.manage_guild
+    assert not group.default_permissions.manage_messages
+    assert asyncio.run(group.interaction_check(interaction))
+    assert asyncio.run(command.source_channel(interaction, channel.id)) is channel
+    # Fixing command visibility must not grant access to hidden source channels.
+    channel.permissions_for.return_value = discord.Permissions.none()
+    with pytest.raises(discord.app_commands.CheckFailure):
+        asyncio.run(command.source_channel(interaction, channel.id))
+
+
+def test_moderators_granted_command_access_still_cannot_manage_retention(monkeypatch):
+    interaction, _channel = moderator_setup(monkeypatch)
+    group = command.MessageHistoryCommands()
+    assert asyncio.run(group.interaction_check(interaction))
+    for name in ("configure", "purge", "import"):
+        admin_checks = [check for check in group.get_command(name).checks if not inspect.iscoroutinefunction(check)]
+        assert admin_checks
+        assert not all(check(interaction) for check in admin_checks)
+    interaction.user.guild_permissions = discord.Permissions.none()
+    interaction.permissions = discord.Permissions.none()
+    with pytest.raises(discord.app_commands.CheckFailure):
+        asyncio.run(group.interaction_check(interaction))
 
 
 def test_private_thread_membership_is_checked(monkeypatch):

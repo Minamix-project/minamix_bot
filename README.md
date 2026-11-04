@@ -246,6 +246,20 @@ responses are ephemeral and views expire after two minutes. Specify the source
 channel when running the command in a different channel. No decrypted message
 body is written to console logs or the administrative audit trail.
 
+Discord command visibility defaults to **Manage Server**, matching the bot's
+administrative convention and the runtime access granted to that permission.
+Administrators can grant `/messagehistory` access to a moderator role under
+Server Settings → Integrations → the bot's command permissions. Such moderators
+still need Manage Messages and source-channel access at runtime; import,
+configuration, and purge remain administrative actions. `/help` lists these
+commands under **Admin · Suivi des messages**, with management commands shown
+to administrators. Command permission changes take effect after deployment and
+the bot's normal guild-command synchronization.
+
+The public Economy help page documents `/pay <user> <amount> <reason>` for player
+transfers. The Roleplay page also references `/pay` for NAX transfers between
+characters; both use the existing currency-selection flow.
+
 Import is explicit, newest-first, bounded to the retention window, and limited
 to one operation per guild. It scans 200 messages by default, up to 1,000, with
 a two-minute deadline and a one-minute command cooldown. Existing tracked
