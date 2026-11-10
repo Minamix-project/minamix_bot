@@ -7,6 +7,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.config import GUILD_IDS
+from src.utils.embed import set_bot_footer
+from src.utils.views import ExpiringView
 from src.utils.error_reporting import report_error
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
@@ -55,7 +57,8 @@ class TicketPanel(discord.ui.View):
 
     async def choose(self, interaction):
         category = interaction.data["values"][0]
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # A fresh menu clears the client selection even when ticket creation is rejected.
+        await interaction.response.edit_message(view=TicketPanel(self.service))
         ticket = await self.service.create(interaction, category)
         await interaction.followup.send(
             f"✅ Ton ticket a été créé : <#{ticket.channel_id}>.", ephemeral=True, allowed_mentions=NO_MENTIONS
@@ -86,6 +89,8 @@ class Tickets(app_commands.Group):
         category="Catégorie Discord des salons privés",
         staff_role="Rôle du personnel de support",
         logs_channel="Salon privé pour les transcripts",
+        title="Titre du panneau ; titre par défaut si omis",
+        text="Texte du panneau ; texte par défaut si omis (\\n pour un saut de ligne)",
     )
     async def panel(
         self,
@@ -94,9 +99,13 @@ class Tickets(app_commands.Group):
         category: discord.CategoryChannel,
         staff_role: discord.Role,
         logs_channel: discord.TextChannel | None = None,
+        title: app_commands.Range[str, 1, 256] | None = None,
+        text: app_commands.Range[str, 1, 4000] | None = None,
     ):
         await interaction.response.defer(ephemeral=True)
-        await self.service.panel(interaction, channel, category, staff_role, logs_channel, TicketPanel(self.service))
+        await self.service.panel(
+            interaction, channel, category, staff_role, logs_channel, TicketPanel(self.service), title=title, text=text
+        )
         await interaction.followup.send(
             f"✅ Panneau de support configuré dans {channel.mention}.", ephemeral=True, allowed_mentions=NO_MENTIONS
         )
@@ -132,7 +141,7 @@ class Tickets(app_commands.Group):
         await interaction.response.defer(ephemeral=True)
         ticket, content = await self.service.transcript(interaction)
         await interaction.followup.send(
-            f"📄 Historique du ticket #{ticket.id}.",
+            f"📄 Historique du ticket #{ticket.reference}.",
             file=transcript_file(ticket, content),
             ephemeral=True,
             allowed_mentions=NO_MENTIONS,
@@ -150,7 +159,7 @@ class Tickets(app_commands.Group):
             ticket = await session.get(interaction.channel_id)
             staff_access = require_access(interaction, ticket)
             staff, _events = await session.history(ticket)
-            embed = discord.Embed(title=f"Ticket #{ticket.id}", color=discord.Color.blurple())
+            embed = discord.Embed(title=f"Ticket #{ticket.reference}", color=discord.Color.blurple())
             embed.add_field(name="Créateur", value=f"<@{ticket.creator_id}> (`{ticket.creator_id}`)")
             embed.add_field(name="Catégorie", value=CATEGORIES[ticket.category])
             embed.add_field(name="État", value="Ouvert" if ticket.status == "open" else "Fermé")
@@ -212,6 +221,30 @@ class Tickets(app_commands.Group):
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="purge", description="Supprimer tous les tickets du serveur et repartir à 0001 (confirmation)."
+    )
+    @app_commands.check(lambda interaction: is_admin(interaction.user))
+    async def purge(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        expected_ids = await self.service.purge_preview(interaction)
+        embed = discord.Embed(
+            title="⚠️ Purger tous les tickets ?",
+            description=f"**{len(expected_ids)} ticket(s)** sur ce serveur.\n\n"
+            "Cette action supprimera définitivement les salons de tickets, leurs données, les interventions, "
+            "l'historique des actions, les transcripts et l'historique des messages conservé en base pour ces salons.\n"
+            "Le prochain ticket sera **ticket-0001**. Le panneau reste en place.\n\n"
+            "Les copies déjà envoyées dans les logs Discord, téléchargées et présentes dans les sauvegardes "
+            "ne sont pas supprimées. Une trace de la purge restera dans le journal d'audit.\n\n"
+            "**Cette suppression est irréversible.**",
+            color=discord.Color.red(),
+        )
+        set_bot_footer(embed, interaction)
+        view = TicketPurgeConfirmation(self.service, interaction.user.id, interaction.guild_id, expected_ids)
+        view.message = await interaction.followup.send(
+            embed=embed, view=view, ephemeral=True, wait=True, allowed_mentions=NO_MENTIONS
+        )
+
     async def change(self, interaction, action, **kwargs):
         await interaction.response.defer(ephemeral=True)
         ticket, content = await self.service.mutate(interaction, action, **kwargs)
@@ -231,7 +264,79 @@ class Tickets(app_commands.Group):
         await interaction.followup.send(message, ephemeral=True, allowed_mentions=NO_MENTIONS)
 
 
+class TicketPurgeConfirmation(ExpiringView):
+    def __init__(self, service, owner_id, guild_id, expected_ids):
+        super().__init__(timeout=60, owner_id=owner_id)
+        self.service = service
+        self.guild_id = guild_id
+        self.expected_ids = expected_ids
+        self.used = False
+
+    async def interaction_check(self, interaction):
+        if not await super().interaction_check(interaction):
+            return False
+        if interaction.guild_id != self.guild_id or not is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Tu dois toujours avoir les droits d'administration sur ce serveur.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Supprimer tous les tickets", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.used or self.is_finished():
+            await interaction.response.send_message(
+                "Cette confirmation a déjà été utilisée ou a expiré.", ephemeral=True
+            )
+            return
+        if not await self.interaction_check(interaction):
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(content="⏳ Suppression des tickets en cours…", embed=None, view=None)
+        count = await self.service.purge(interaction, self.expected_ids)
+        await interaction.edit_original_response(
+            content=f"✅ {count} ticket(s) supprimé(s), historiques et transcripts effacés. Le prochain ticket sera **ticket-0001**.",
+            embed=None,
+            view=None,
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.used or self.is_finished():
+            return
+        if not await self.interaction_check(interaction):
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(
+            content="✅ Purge annulée. Aucun ticket n'a été supprimé.", embed=None, view=None
+        )
+
+    async def on_error(self, interaction, error, item):
+        if self.used:
+            await interaction.edit_original_response(
+                content="❌ Purge interrompue. Consulte le détail ci-dessous.", embed=None, view=None
+            )
+        await send_error(interaction, error)
+
+
 class TicketActivity(commands.Cog):
+    def __init__(self, bot, service):
+        self.bot = bot
+        self.service = service
+        self.normalized = False
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        if self.normalized:
+            return
+        for guild_id in GUILD_IDS:
+            guild = self.bot.get_guild(guild_id)
+            if guild:
+                await self.service.normalize_channel_names(guild)
+        self.normalized = True
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.guild is None or message.guild.id not in GUILD_IDS or message.author.bot:
@@ -244,4 +349,4 @@ async def register(bot):
     service = TicketService()
     bot.tree.add_command(Tickets(service))
     bot.add_view(TicketPanel(service))
-    await bot.add_cog(TicketActivity())
+    await bot.add_cog(TicketActivity(bot, service))

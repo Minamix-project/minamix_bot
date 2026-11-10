@@ -44,6 +44,11 @@ class Ticket:
     close_reason: str | None
     saved_overwrites: str | None
     active_creator: int | None = None
+    ticket_number: int | None = None
+
+    @property
+    def reference(self):
+        return f"{self.ticket_number if self.ticket_number is not None else self.id:04d}"
 
 
 class TicketSession:
@@ -65,11 +70,13 @@ class TicketSession:
         rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s", (self.guild_id,))
         return rows[0] if rows else None
 
-    async def save_panel(self, channel_id, message_id, category_id, staff_role_id, logs_channel_id):
+    async def save_panel(
+        self, channel_id, message_id, category_id, staff_role_id, logs_channel_id, *, title=None, text=None
+    ):
         await self.execute(
-            "INSERT INTO ticket_panels (guild_id, channel_id, message_id, category_id, staff_role_id, logs_channel_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE channel_id = %s, "
-            "message_id = %s, category_id = %s, staff_role_id = %s, logs_channel_id = %s",
+            "INSERT INTO ticket_panels (guild_id, channel_id, message_id, category_id, staff_role_id, logs_channel_id, title, description) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE channel_id = %s, "
+            "message_id = %s, category_id = %s, staff_role_id = %s, logs_channel_id = %s, title = %s, description = %s",
             (
                 self.guild_id,
                 channel_id,
@@ -77,11 +84,15 @@ class TicketSession:
                 category_id,
                 staff_role_id,
                 logs_channel_id,
+                title,
+                text,
                 channel_id,
                 message_id,
                 category_id,
                 staff_role_id,
                 logs_channel_id,
+                title,
+                text,
             ),
         )
 
@@ -99,11 +110,53 @@ class TicketSession:
         )
         return Ticket(**rows[0]) if rows else None
 
-    async def create(self, channel_id, creator_id, category, panel):
+    async def next_number(self):
+        await self.execute(
+            "INSERT INTO ticket_sequences (guild_id) VALUES (%s) ON DUPLICATE KEY UPDATE guild_id = %s",
+            (self.guild_id, self.guild_id),
+        )
+        rows = await self.rows(
+            "SELECT next_number FROM ticket_sequences WHERE guild_id = %s FOR UPDATE", (self.guild_id,)
+        )
+        number = rows[0]["next_number"]
+        await self.execute(
+            "UPDATE ticket_sequences SET next_number = next_number + 1 WHERE guild_id = %s", (self.guild_id,)
+        )
+        return number
+
+    async def all(self):
+        rows = await self.rows("SELECT * FROM tickets WHERE guild_id = %s ORDER BY id", (self.guild_id,))
+        return [Ticket(**row) for row in rows]
+
+    async def purge(self):
+        # Use the history subsystem's state lock to keep its counters consistent.
+        await self.rows(
+            "SELECT guild_id FROM guild_message_history_state WHERE guild_id = %s FOR UPDATE", (self.guild_id,)
+        )
+        await self.execute(
+            "DELETE h FROM guild_message_history h JOIN tickets t ON t.guild_id = h.guild_id AND t.channel_id = h.channel_id "
+            "WHERE t.guild_id = %s",
+            (self.guild_id,),
+        )
+        await self.execute(
+            "UPDATE guild_message_history_state SET entry_count = "
+            "(SELECT COUNT(*) FROM guild_message_history WHERE guild_id = %s), generation = generation + 1 WHERE guild_id = %s",
+            (self.guild_id, self.guild_id),
+        )
+        # Events, staff participation and transcript parts are removed by foreign-key cascades.
+        await self.execute("DELETE FROM tickets WHERE guild_id = %s", (self.guild_id,))
+        await self.execute("DELETE FROM ticket_sequences WHERE guild_id = %s", (self.guild_id,))
+        await self.execute(
+            "DELETE FROM admin_audit WHERE guild_id = %s AND action LIKE %s", (self.guild_id, "ticket.%")
+        )
+
+    async def create(self, channel_id, creator_id, category, panel, *, number=None):
+        if number is None:
+            number = await self.next_number()
         return await self.execute(
-            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_id, logs_channel_id, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
-            (self.guild_id, channel_id, creator_id, category, panel["staff_role_id"], panel["logs_channel_id"]),
+            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_id, logs_channel_id, ticket_number, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            (self.guild_id, channel_id, creator_id, category, panel["staff_role_id"], panel["logs_channel_id"], number),
         )
 
     async def event(self, ticket, actor_id, action, detail=None, *, staff=False):
@@ -120,7 +173,7 @@ class TicketSession:
             )
         await self.execute(
             "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
-            (self.guild_id, actor_id, f"ticket.{action}: #{ticket.id} channel={ticket.channel_id}"),
+            (self.guild_id, actor_id, f"ticket.{action}: #{ticket.reference} channel={ticket.channel_id}"),
         )
 
     async def close(self, ticket, actor_id, reason, overwrites):

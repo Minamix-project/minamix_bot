@@ -495,6 +495,18 @@ Manage Permissions in the ticket category, and View Channel, Send Messages,
 Read Message History, Embed Links and Attach Files in the relevant channels.
 Enable the privileged Message Content and Server Members intents.
 
+Optional `title` (up to 256 characters) and `text` (up to 4,000 characters)
+customize the panel. Omit them to use the default title and message. Use literal
+`\n` in `text` for line breaks. The footer always shows the bot's name and
+avatar, including its default avatar if no custom one is set. The category menu
+clears after every selection, including rejected requests, so members can select
+the same category again.
+
+Ticket numbers are independent per server and channel names use `ticket-0001`,
+`ticket-0002`, etc. Numbers longer than four digits are kept in full. Existing
+numbers are preserved by the migration; default channel names are padded on
+startup, while custom names remain unchanged.
+
 Each member can have one open ticket per server. New channels use explicit
 permissions for the creator, the configured support role and the bot; other
 category permissions are not copied. Discord administrators can always access
@@ -511,6 +523,7 @@ when they were created. Category/role removal requires panel reconfiguration.
 | `/ticket transcript` | Creator or support; private UTF-8 text file, saved in MySQL |
 | `/ticket info` | Creator or support; category, creator, dates, staff and closure details |
 | `/ticket link <user>` | Support role or administration; associate a subject without granting access |
+| `/ticket purge` | Administration; confirmation required; delete all ticket channels/data in this server and reset numbering |
 | `/ticket reconcile <channel_id> <reason>` | Administration; close a record only after Discord confirms its channel was deleted |
 
 All management replies are ephemeral and require visibility of the current
@@ -543,5 +556,19 @@ its closing snapshot; an open ticket creates a fresh snapshot. Exports are cappe
 at 20,000 messages and the smaller of 8 MiB or the server upload limit. Exceeding
 a limit or failing to read history aborts closure and restores permissions, with
 no silently truncated transcript. Records and transcripts remain in MySQL until
-removed by an administrator through database maintenance and are covered by the
+removed by an administrator with `/ticket purge` or through database maintenance and are covered by the
 normal database backups. No administrative web interface is introduced.
+
+
+Run `/ticket purge` outside a ticket channel. Its private confirmation expires
+after 60 seconds and is restricted to the requesting administrator. Permissions
+are checked again on confirmation, and the confirmation can only be used once.
+The preview itself does not delete anything. If the ticket list changes, a new
+confirmation is required. Purge deletes open and closed ticket channels, ticket
+metadata, staff participation, action history, database transcripts and retained
+message history for those channels. The panel remains configured, and the next
+ticket is `ticket-0001`. Other servers and unrelated message history are kept.
+If any channel deletion fails, records and numbering are retained for a retry;
+some channels may already have been deleted. A minimal purge audit record is kept.
+Copies already sent to Discord logs, downloaded exports and existing SQL backups
+are outside this database purge and follow their existing retention.

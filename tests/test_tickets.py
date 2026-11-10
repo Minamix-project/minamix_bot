@@ -47,6 +47,8 @@ def destination():
         member(8, admin=True),
         member(99),
     )
+    bot.name = "Aurum"
+    bot.display_avatar = SimpleNamespace(url="https://example.test/avatar.png")
     guild.me, guild.default_role = bot, everyone
     members = {value.id: value for value in (creator, staff, outsider, admin, bot)}
     guild.get_role.side_effect = lambda role_id: {1: everyone, 5: staff_role}.get(role_id)
@@ -105,6 +107,7 @@ def destination():
     async def create_text_channel(name, **kwargs):
         value = channel(40)
         value.overwrites = kwargs["overwrites"]
+        value.name = name
         return value
 
     guild.create_text_channel = AsyncMock(side_effect=create_text_channel)
@@ -251,6 +254,7 @@ def test_creation_rolls_back_discord_channel_if_database_insert_fails(monkeypatc
                 }
             ),
             active=AsyncMock(return_value=None),
+            next_number=AsyncMock(return_value=1),
             create=AsyncMock(side_effect=RuntimeError("DB failed")),
         )
         install_session(monkeypatch, session)
@@ -324,8 +328,9 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "link",
                 "info",
                 "reconcile",
+                "purge",
             }
-            for name in ("panel", "reconcile"):
+            for name in ("panel", "reconcile", "purge"):
                 check = group.get_command(name).checks[0]
                 assert not check(SimpleNamespace(user=SimpleNamespace(guild_permissions=discord.Permissions.none())))
                 assert check(
@@ -424,6 +429,8 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
             async with db.cursor() as cursor:
                 await cursor.execute("DELETE FROM tickets")
                 await cursor.execute("DELETE FROM ticket_panels")
+                await cursor.execute("DELETE FROM ticket_sequences")
+                await cursor.execute("DELETE FROM guild_message_history WHERE guild_id IN (1, 999)")
         finally:
             db.close()
         env = destination()
@@ -439,6 +446,8 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         env.interaction.channel, env.interaction.channel_id = env.panel, 20
         opened = await manager.create(env.interaction, "report")
         assert opened.status == "open" and opened.creator_id == 2
+        assert opened.reference == "0001"
+        assert env.channels[40].name == "ticket-0001"
         async with store.ticket_session(999) as other:
             assert await other.get(opened.channel_id) is None
             assert await other.active(2) is None
@@ -496,7 +505,62 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
             assert (await session.active(2)).id == reopened.id
             assert await session.get(41) is None
             audits = await session.rows("SELECT action FROM admin_audit WHERE guild_id = 1 AND action LIKE 'ticket.%'")
-            assert any(f"#{opened.id}" in row["action"] for row in audits)
+            assert any(f"#{opened.reference}" in row["action"] for row in audits)
+
+        # Purge all ticket data for one guild while preserving another guild and its counter.
+        async with store.ticket_session(999) as other:
+            other_panel = {"staff_role_id": 5, "logs_channel_id": None}
+            await other.save_panel(90, 900, 91, 5, None)
+            await other.create(92, 2, "general", other_panel)
+            foreign = await other.get(92)
+            await other.save_transcript(foreign, 3, b"Other guild transcript")
+        async with store.ticket_session(1) as session:
+            await session.create(41, 7, "general", await session.panel())
+            await session.execute(
+                "INSERT INTO guild_message_history_state (guild_id, entry_count) VALUES (1, 2) "
+                "ON DUPLICATE KEY UPDATE entry_count = 2"
+            )
+            for channel_id in (40, 60):
+                await session.execute(
+                    "INSERT INTO guild_message_history (guild_id, channel_id, message_id, event_kind, recorded_at, "
+                    "retention_started_at, expires_at, payload) VALUES (1, %s, %s, 'created', 0, 0, 2000000000, 'test')",
+                    (channel_id, channel_id * 100),
+                )
+        env.interaction.user, env.interaction.channel_id = env.admin, 20
+
+        async def fetch(channel_id):
+            if channel_id not in env.channels:
+                raise discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing channel")
+            return env.channels[channel_id]
+
+        env.guild.fetch_channel = AsyncMock(side_effect=fetch)
+        expected = await manager.purge_preview(env.interaction)
+        assert len(expected) == 2
+        assert await manager.purge(env.interaction, expected) == 2
+        assert 40 not in env.channels and 20 in env.channels
+        async with store.ticket_session(1) as session:
+            assert await session.all() == []
+            assert await session.panel() is not None
+            for table in ("ticket_staff", "ticket_events", "ticket_transcripts"):
+                remaining = await session.rows(
+                    f"SELECT COUNT(*) AS total FROM {table} WHERE ticket_id = %s", (opened.id,)
+                )
+                assert remaining[0]["total"] == 0
+            histories = await session.rows("SELECT channel_id FROM guild_message_history WHERE guild_id = 1")
+            assert [row["channel_id"] for row in histories] == [60]
+            state = await session.rows("SELECT entry_count FROM guild_message_history_state WHERE guild_id = 1")
+            assert state[0]["entry_count"] == 1
+            audit = await session.rows("SELECT action FROM admin_audit WHERE guild_id = 1 AND action LIKE 'ticket.%'")
+            assert [row["action"] for row in audit] == ["ticket.purge: count=2"]
+        async with store.ticket_session(999) as other:
+            assert (await other.get(92)).id == foreign.id
+            assert await other.latest_transcript(foreign) == b"Other guild transcript"
+            assert await other.next_number() == 2
+        env.interaction.channel = env.panel
+        env.interaction.user = env.creator
+        restarted = await manager.create(env.interaction, "shop")
+        assert restarted.id > opened.id and restarted.reference == "0001"
+        assert env.channels[40].name == "ticket-0001"
 
     asyncio.run(scenario())
 
@@ -518,7 +582,9 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
         assert result.id == 200
         env.panel.send.assert_not_awaited()
         assert message.edit.await_args.kwargs["embed"].title == "Besoin d’aide ?"
-        session.save_panel.assert_awaited_once_with(20, 200, 30, 5, None)
+        session.save_panel.assert_awaited_once_with(
+            20, 200, 30, 5, None, title=service.DEFAULT_PANEL_TITLE, text=service.DEFAULT_PANEL_TEXT
+        )
         env.staff_role.is_default.return_value = True
         with pytest.raises(store.TicketError, match="dédié"):
             await service.TicketService().panel(env.interaction, env.panel, env.category, env.staff_role, None, None)
@@ -554,5 +620,218 @@ def test_info_respects_existing_moderation_permissions(monkeypatch, identity, su
         assert ("Utilisateur concerné" in fields) is subject_visible
         assert ("Modération" in fields) is moderation_visible
         assert kwargs["ephemeral"] and kwargs["allowed_mentions"].to_dict()["parse"] == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("rejected", [False, True])
+def test_category_menu_resets_before_every_attempt_even_when_rejected(rejected):
+    async def scenario():
+        manager = SimpleNamespace(create=AsyncMock(return_value=ticket()))
+        if rejected:
+            manager.create.side_effect = store.TicketError("Ticket déjà ouvert")
+        view = command.TicketPanel(manager)
+        interaction = SimpleNamespace(
+            data={"values": ["report"]},
+            response=SimpleNamespace(edit_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        for _attempt in range(2):
+            if rejected:
+                with pytest.raises(store.TicketError):
+                    await view.choose(interaction)
+            else:
+                await view.choose(interaction)
+        assert interaction.response.edit_message.await_count == 2
+        assert manager.create.await_count == 2
+        for call in interaction.response.edit_message.await_args_list:
+            fresh_view = call.kwargs["view"]
+            assert fresh_view is not view
+            assert all(not option.default for option in fresh_view.children[0].options)
+        assert manager.create.await_args.args[1] == "report"
+
+    asyncio.run(scenario())
+
+
+def test_custom_panel_title_text_and_bot_footer(monkeypatch):
+    async def scenario():
+        env = destination()
+        session = SimpleNamespace(panel=AsyncMock(return_value=None), save_panel=AsyncMock(), execute=AsyncMock())
+        install_session(monkeypatch, session)
+        env.panel.send.return_value = SimpleNamespace(id=200, delete=AsyncMock())
+        await service.TicketService().panel(
+            env.interaction,
+            env.panel,
+            env.category,
+            env.staff_role,
+            None,
+            None,
+            title="Support du serveur",
+            text=r"Bonjour !\nComment peut-on t'aider ?",
+        )
+        embed = env.panel.send.await_args.kwargs["embed"]
+        assert embed.title == "Support du serveur"
+        assert embed.description == "Bonjour !\nComment peut-on t'aider ?"
+        assert embed.footer.text == "Aurum"
+        assert embed.footer.icon_url == "https://example.test/avatar.png"
+        assert session.save_panel.await_args.kwargs["text"] == embed.description
+
+    asyncio.run(scenario())
+
+
+def confirmation_interaction(user_id=8, *, admin=True):
+    return SimpleNamespace(
+        user=SimpleNamespace(id=user_id, guild_permissions=discord.Permissions(manage_guild=admin)),
+        guild_id=1,
+        response=SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+
+
+def test_purge_confirmation_cannot_be_reused_or_used_by_another_member():
+    async def scenario():
+        manager = SimpleNamespace(purge=AsyncMock(return_value=2))
+        view = command.TicketPurgeConfirmation(manager, 8, 1, (1, 2))
+        stranger = confirmation_interaction(9)
+        await view.confirm.callback(stranger)
+        manager.purge.assert_not_awaited()
+        demoted = confirmation_interaction(admin=False)
+        await view.confirm.callback(demoted)
+        manager.purge.assert_not_awaited()
+        owner = confirmation_interaction()
+        await view.confirm.callback(owner)
+        await view.confirm.callback(owner)
+        manager.purge.assert_awaited_once_with(owner, (1, 2))
+        assert view.is_finished()
+        assert "ticket-0001" in owner.edit_original_response.await_args.kwargs["content"]
+        cancelled = command.TicketPurgeConfirmation(manager, 8, 1, (1, 2))
+        await cancelled.cancel.callback(owner)
+        await cancelled.confirm.callback(owner)
+        assert manager.purge.await_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_purge_preview_does_not_delete_and_confirmation_is_required():
+    async def scenario():
+        env = destination()
+        env.interaction.user = env.admin
+        env.interaction.response = SimpleNamespace(defer=AsyncMock())
+        env.interaction.followup = SimpleNamespace(send=AsyncMock())
+        manager = SimpleNamespace(purge_preview=AsyncMock(return_value=(1, 2)), purge=AsyncMock())
+        group = command.Tickets(manager)
+        await group.get_command("purge").callback(group, env.interaction)
+        manager.purge.assert_not_awaited()
+        assert isinstance(env.interaction.followup.send.await_args.kwargs["view"], command.TicketPurgeConfirmation)
+        assert "irréversible" in env.interaction.followup.send.await_args.kwargs["embed"].description
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("failure", ["permissions", "changed", "panel", "caller"])
+def test_purge_preserves_records_and_counter_when_it_cannot_finish(monkeypatch, failure):
+    async def scenario():
+        env = destination()
+        env.interaction.user = env.admin
+        env.interaction.channel_id = 50
+        session = SimpleNamespace(
+            all=AsyncMock(return_value=[ticket()]),
+            panel=AsyncMock(return_value={"channel_id": 20}),
+            purge=AsyncMock(),
+            execute=AsyncMock(),
+        )
+        env.guild.fetch_channel = AsyncMock(return_value=env.current)
+        install_session(monkeypatch, session)
+        expected = (1,)
+        if failure == "permissions":
+            env.current.delete.side_effect = discord.Forbidden(
+                SimpleNamespace(status=403, reason="Forbidden"), "denied"
+            )
+        elif failure == "changed":
+            expected = ()
+        elif failure == "panel":
+            session.panel.return_value["channel_id"] = 10
+        else:
+            env.interaction.channel_id = 10
+        with pytest.raises(store.TicketError):
+            await service.TicketService().purge(env.interaction, expected)
+        session.purge.assert_not_awaited()
+        if failure != "permissions":
+            env.guild.fetch_channel.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_existing_default_channel_names_are_padded_but_custom_names_are_preserved(monkeypatch):
+    async def scenario():
+        env = destination()
+        env.current.name = "ticket-1"
+        env.panel.name = "rapport-personnalise"
+        session = SimpleNamespace(
+            all=AsyncMock(return_value=[ticket(ticket_number=1), ticket(id=2, channel_id=20, ticket_number=2)])
+        )
+        install_session(monkeypatch, session)
+        await service.TicketService().normalize_channel_names(env.guild)
+        assert env.current.name == "ticket-0001"
+        env.panel.edit.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequences(monkeypatch, tmp_path):
+    import os
+    from pathlib import Path
+
+    import aiomysql
+
+    from src.core.db_init import init_db
+    from src.core import schema_migrations
+
+    port = os.getenv("TICKET_TEST_DB_PORT") or os.getenv("REMINDER_TEST_DB_PORT")
+    if not port:
+        pytest.skip("Requires a disposable MySQL test database")
+    current_migrations = Path("src/migrations")
+    legacy_migrations = tmp_path / "legacy_migrations"
+    legacy_migrations.mkdir()
+    for migration in current_migrations.glob("*.sql"):
+        if migration.name < "0014":
+            (legacy_migrations / migration.name).write_text(migration.read_text())
+    monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", legacy_migrations)
+
+    async def scenario():
+        admin = await aiomysql.connect(host="127.0.0.1", port=int(port), user="root", password="", autocommit=True)
+        try:
+            async with admin.cursor() as cursor:
+                await cursor.execute("CREATE DATABASE ticket_upgrade_test CHARACTER SET utf8mb4")
+            db = await aiomysql.connect(
+                host="127.0.0.1",
+                port=int(port),
+                user="root",
+                password="",
+                db="ticket_upgrade_test",
+                autocommit=True,
+                charset="utf8mb4",
+            )
+            try:
+                await init_db(db)
+                async with db.cursor() as cursor:
+                    await cursor.execute(
+                        "INSERT INTO tickets (id, guild_id, channel_id, creator_id, category, staff_role_id) "
+                        "VALUES (11, 1, 101, 2, 'general', 5), (22, 1, 102, 3, 'report', 5), (42, 2, 201, 2, 'shop', 5)"
+                    )
+                monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", current_migrations)
+                await init_db(db)
+                await init_db(db)
+                async with db.cursor() as cursor:
+                    await cursor.execute("SELECT id, ticket_number FROM tickets ORDER BY id")
+                    assert list(await cursor.fetchall()) == [(11, 11), (22, 22), (42, 42)]
+                    await cursor.execute("SELECT guild_id, next_number FROM ticket_sequences ORDER BY guild_id")
+                    assert list(await cursor.fetchall()) == [(1, 23), (2, 43)]
+            finally:
+                db.close()
+        finally:
+            async with admin.cursor() as cursor:
+                await cursor.execute("DROP DATABASE ticket_upgrade_test")
+            admin.close()
 
     asyncio.run(scenario())

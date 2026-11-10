@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
 MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_MESSAGES = 20000
+DEFAULT_PANEL_TITLE = "Besoin d’aide ?"
+DEFAULT_PANEL_TEXT = (
+    "Choisis le type de demande ci-dessous.\n"
+    "Aurum ouvrira un salon privé avec le personnel autorisé.\n"
+    "Un seul ticket peut être ouvert par membre.\n"
+    "À la fermeture, un historique sera conservé pour le support."
+)
 EVENT_LABELS = {
     "created": "Création",
     "closed": "Fermeture",
@@ -161,7 +168,7 @@ def archive_overwrites(guild, overwrites):
 
 
 def transcript_file(ticket, content):
-    return discord.File(io.BytesIO(content), filename=f"ticket-{ticket.id}.txt")
+    return discord.File(io.BytesIO(content), filename=f"ticket-{ticket.reference}.txt")
 
 
 def utc_label(value):
@@ -175,7 +182,7 @@ async def build_transcript(channel, ticket, session):
         raise TicketError("Le bot doit pouvoir voir le ticket et lire son historique pour le sauvegarder.")
     staff, events = await session.history(ticket)
     lines = [
-        f"Ticket #{ticket.id}",
+        f"Ticket #{ticket.reference}",
         f"Serveur : {ticket.guild_id}",
         f"Salon : {channel.name} ({channel.id})",
         f"Créateur : {ticket.creator_id}",
@@ -247,18 +254,17 @@ async def operation(guild_id):
 
 
 class TicketService:
-    async def panel(self, interaction, channel, category, staff_role, logs_channel, view):
+    async def panel(self, interaction, channel, category, staff_role, logs_channel, view, *, title=None, text=None):
         validate_setup(interaction.guild, channel, category, staff_role, logs_channel)
         if not channel.permissions_for(interaction.user).view_channel:
             raise TicketError("Tu dois pouvoir voir le salon du panneau.")
-        embed = discord.Embed(
-            title="Besoin d’aide ?",
-            description="Choisis le type de demande ci-dessous.\n"
-            "Aurum ouvrira un salon privé avec le personnel autorisé.\n"
-            "Un seul ticket peut être ouvert par membre.\n"
-            "À la fermeture, un historique sera conservé pour le support.",
-            color=discord.Color.blurple(),
-        )
+        title = (title or "").strip() or DEFAULT_PANEL_TITLE
+        text = (text or "").strip().replace("\\n", "\n") or DEFAULT_PANEL_TEXT
+        if len(title) > 256 or len(text) > 4000:
+            raise TicketError("Le titre est limité à 256 caractères et le texte à 4 000 caractères.")
+        embed = discord.Embed(title=title, description=text, color=discord.Color.blurple())
+        bot_user = interaction.client.user
+        embed.set_footer(text=bot_user.name, icon_url=bot_user.display_avatar.url)
         async with operation(interaction.guild_id) as (session, undo):
             previous = await session.panel()
             message = None
@@ -275,7 +281,13 @@ class TicketService:
                 message = await channel.send(embed=embed, view=view, allowed_mentions=NO_MENTIONS)
                 undo.append(message.delete)
             await session.save_panel(
-                channel.id, message.id, category.id, staff_role.id, logs_channel.id if logs_channel else None
+                channel.id,
+                message.id,
+                category.id,
+                staff_role.id,
+                logs_channel.id if logs_channel else None,
+                title=title,
+                text=text,
             )
             await session.execute(
                 "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
@@ -318,15 +330,16 @@ class TicketService:
             validate_setup(guild, interaction.channel, destination, staff_role, None)
             if len(destination.channels) >= 50:
                 raise TicketError("La catégorie de support est pleine. Contacte le personnel.")
+            number = await session.next_number()
             channel = await guild.create_text_channel(
-                f"ticket-{interaction.user.id}",
+                f"ticket-{number:04d}",
                 category=destination,
                 overwrites=private_overwrites(guild, interaction.user, staff_role),
                 topic=f"Aurum | {CATEGORIES[category]} | {interaction.user.id}",
                 reason="Création d'un ticket de support",
             )
             undo.append(channel.delete)
-            await session.create(channel.id, interaction.user.id, category, panel)
+            await session.create(channel.id, interaction.user.id, category, panel, number=number)
             ticket = await session.get(channel.id)
             await session.event(
                 ticket,
@@ -335,7 +348,6 @@ class TicketService:
                 CATEGORIES[category],
                 staff=is_staff(interaction.user, ticket.staff_role_id),
             )
-            await channel.edit(name=f"ticket-{ticket.id}")
             await channel.send(
                 f"Bienvenue <@{interaction.user.id}> !\n**{CATEGORIES[category]}** — Explique ta demande ici.\n"
                 "Le personnel te répondra dès que possible. Utilise `/ticket close reason:...` pour fermer le ticket.\n"
@@ -431,6 +443,69 @@ class TicketService:
             await session.event(ticket, interaction.user.id, "transcript", staff=staff)
         return ticket, content
 
+    async def normalize_channel_names(self, guild):
+        async with ticket_session(guild.id) as session:
+            tickets = await session.all()
+        for ticket in tickets:
+            channel = guild.get_channel(ticket.channel_id)
+            if channel and channel.name in {f"ticket-{ticket.id}", f"ticket-{ticket.ticket_number}"}:
+                try:
+                    await channel.edit(
+                        name=f"ticket-{ticket.reference}", reason="Mise au format des numéros de tickets"
+                    )
+                except discord.HTTPException:
+                    logger.warning(
+                        "Could not normalize ticket channel guild=%s channel=%s", guild.id, ticket.channel_id
+                    )
+
+    async def purge_preview(self, interaction):
+        if not is_admin(interaction.user):
+            raise TicketError("Cette action est réservée à l'administration du serveur.")
+        async with ticket_session(interaction.guild_id) as session:
+            tickets = await session.all()
+            if any(ticket.channel_id == interaction.channel_id for ticket in tickets):
+                raise TicketError("Lance la purge depuis un salon qui n'est pas un ticket.")
+            return tuple(ticket.id for ticket in tickets)
+
+    async def purge(self, interaction, expected_ids):
+        if not is_admin(interaction.user):
+            raise TicketError("Cette action est réservée à l'administration du serveur.")
+        async with ticket_session(interaction.guild_id) as session:
+            tickets = await session.all()
+            if tuple(ticket.id for ticket in tickets) != expected_ids:
+                raise TicketError(
+                    "La liste des tickets a changé. Relance `/ticket purge` pour confirmer la nouvelle liste."
+                )
+            panel = await session.panel()
+            protected_ids = {interaction.channel_id}
+            if panel:
+                protected_ids.add(panel["channel_id"])
+            if any(ticket.channel_id in protected_ids for ticket in tickets):
+                raise TicketError(
+                    "Le panneau ou la commande se trouve dans un ticket. Déplace-le avant de relancer la purge."
+                )
+            failed = []
+            for ticket in tickets:
+                try:
+                    # Fetch by persisted ID: never delete unrelated channels based on their names.
+                    channel = await interaction.guild.fetch_channel(ticket.channel_id)
+                    await channel.delete(reason="Purge des tickets confirmée par l'administration")
+                except discord.NotFound:
+                    continue
+                except discord.HTTPException:
+                    failed.append(ticket.channel_id)
+            if failed:
+                raise TicketError(
+                    f"{len(failed)} salon(s) n'ont pas pu être supprimés. Les autres salons ont pu être supprimés. "
+                    "Les enregistrements et le compteur sont conservés : vérifie les permissions puis relance la purge."
+                )
+            await session.purge()
+            await session.execute(
+                "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
+                (interaction.guild_id, interaction.user.id, f"ticket.purge: count={len(tickets)}"),
+            )
+        return len(tickets)
+
     async def log_close(self, guild, ticket, content):
         if not ticket.logs_channel_id:
             return None
@@ -440,7 +515,7 @@ class TicketService:
             if channel.permissions_for(guild.default_role).view_channel:
                 raise TicketError("Le salon de logs est devenu public.")
             embed = discord.Embed(
-                title=f"Ticket #{ticket.id} fermé",
+                title=f"Ticket #{ticket.reference} fermé",
                 color=discord.Color.orange(),
                 description=f"Créateur : <@{ticket.creator_id}>\nCatégorie : {CATEGORIES[ticket.category]}\n"
                 f"Fermé par : <@{ticket.closed_by}>\nRaison : {ticket.close_reason}",
