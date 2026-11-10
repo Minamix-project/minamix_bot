@@ -161,14 +161,23 @@ def test_ticket_access_requires_authority_and_source_visibility(identity, staff_
         service.require_access(env.interaction, ticket())
 
 
-def test_private_overwrites_ignore_category_and_archive_restores_all_access():
+@pytest.mark.parametrize("creator_has_support_role", [False, True])
+def test_private_overwrites_ignore_category_and_archive_restores_all_access(creator_has_support_role):
     async def scenario():
         env = destination()
+        if creator_has_support_role:
+            env.creator.roles.append(env.staff_role)
         original = env.current.overwrites
         assert set(original) == {env.guild.default_role, env.guild.me, env.creator, env.staff_role}
         assert original[env.guild.default_role].view_channel is False
-        closed = service.archive_overwrites(env.guild, original)
-        assert closed[env.creator].view_channel
+        original[env.outsider] = service.member_overwrite()
+        original[env.staff] = service.member_overwrite()
+        closed = service.archive_overwrites(env.guild, original, (5,), creator_id=env.creator.id)
+        assert closed[env.creator].view_channel is False
+        assert closed[env.outsider].view_channel is False
+        assert closed[env.staff_role].view_channel is True
+        assert closed[env.staff].view_channel is True
+        assert closed[env.guild.me].view_channel is True
         assert closed[env.creator].send_messages is False
         assert closed[env.staff_role].send_messages_in_threads is False
         assert closed[env.guild.me].send_messages is True
@@ -271,6 +280,7 @@ def test_creation_rolls_back_discord_channel_if_database_insert_fails(monkeypatc
 def test_failed_closure_restores_permissions(monkeypatch, failure):
     async def scenario():
         env = destination()
+        env.current.overwrites[env.outsider] = service.member_overwrite()
         original = service.serialize_overwrites(env.current.overwrites)
         current = ticket()
 
@@ -382,6 +392,7 @@ def test_member_management_reopen_and_subject_link_preserve_access(monkeypatch):
         assert env.current.overwrites[env.outsider].view_channel is False
         with pytest.raises(store.TicketError, match="créateur"):
             await manager.mutate(env.interaction, "removed", user=env.creator)
+        await manager.mutate(env.interaction, "added", user=env.outsider)
         before = service.serialize_overwrites(env.current.overwrites)
         await manager.mutate(env.interaction, "linked", user=env.outsider)
         assert before == service.serialize_overwrites(env.current.overwrites)
@@ -389,7 +400,9 @@ def test_member_management_reopen_and_subject_link_preserve_access(monkeypatch):
         await manager.mutate(env.interaction, "renamed", name="Équipe support")
         assert env.current.name == "équipe-support"
         current = replace(current, status="closed", saved_overwrites=json.dumps(before))
-        env.current.overwrites = service.archive_overwrites(env.guild, env.current.overwrites)
+        env.current.overwrites = service.archive_overwrites(
+            env.guild, env.current.overwrites, (5,), creator_id=env.creator.id
+        )
         session.active.return_value = ticket(id=2)
         with pytest.raises(store.TicketError, match="déjà"):
             await manager.mutate(env.interaction, "reopened")
@@ -397,6 +410,8 @@ def test_member_management_reopen_and_subject_link_preserve_access(monkeypatch):
         await manager.mutate(env.interaction, "reopened")
         assert service.serialize_overwrites(env.current.overwrites) == before
         session.reopen.assert_awaited_once()
+        assert env.current.overwrites[env.creator].view_channel is True
+        assert env.current.overwrites[env.outsider].view_channel is True
 
     asyncio.run(scenario())
 
@@ -477,6 +492,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         env.interaction.user = env.staff
         await manager.mutate(env.interaction, "added", user=env.outsider)
         await manager.mutate(env.interaction, "removed", user=env.outsider)
+        await manager.mutate(env.interaction, "added", user=env.outsider)
         await manager.mutate(env.interaction, "renamed", name="rapport-rp")
         await manager.mutate(env.interaction, "linked", user=env.outsider)
         original = service.serialize_overwrites(env.interaction.channel.overwrites)
@@ -488,19 +504,27 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         assert "Problème résolu 🥇" in exported.decode()
         assert closed.subject_id == env.outsider.id
         assert env.interaction.channel.overwrites[env.creator].send_messages is False
-        # A new service instance reads the closing snapshot from persisted data.
+        assert env.interaction.channel.overwrites[env.creator].view_channel is False
+        assert env.interaction.channel.overwrites[env.outsider].view_channel is False
+        assert env.interaction.channel.overwrites[env.staff_role].view_channel is True
+        # Closed participants cannot consult the ticket; staff can retrieve the persisted snapshot.
+        with pytest.raises(store.TicketError, match="accès"):
+            await service.TicketService().transcript(env.interaction)
+        env.interaction.user = env.staff
         retrieved, content = await service.TicketService().transcript(env.interaction)
         assert retrieved.id == closed.id and content == exported
-        env.interaction.user = env.staff
         reopened, _content = await manager.mutate(env.interaction, "reopened")
         assert reopened.status == "open" and reopened.closed_by is None
         assert service.serialize_overwrites(env.interaction.channel.overwrites) == original
+        assert env.interaction.channel.overwrites[env.creator].view_channel is True
+        assert env.interaction.channel.overwrites[env.outsider].view_channel is True
         async with store.ticket_session(1) as session:
             _staff, events = await session.history(reopened)
             assert [row["action"] for row in events] == [
                 "created",
                 "added",
                 "removed",
+                "added",
                 "renamed",
                 "linked",
                 "closed",

@@ -561,10 +561,10 @@ when they were created. Category/role removal requires panel reconfiguration.
 | `/ticket add <user>` | Support role or administration; grant access to another member |
 | `/ticket remove <user>` | Support role or administration; deny that member access |
 | `/ticket rename <name>` | Support role or administration; rename the current ticket |
-| `/ticket close <reason>` | Creator or support; archive as read-only and save a transcript |
+| `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
 | `/ticket reopen` | Support role or administration; restore previous access permissions |
-| `/ticket transcript` | Creator or support; private UTF-8 text file, saved in MySQL |
-| `/ticket info` | Creator or support; category, creator, dates, staff and closure details |
+| `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
+| `/ticket info` | Creator while open, or support; category, creator, dates, staff and closure details |
 | `/ticket link <user>` | Support role or administration; associate a subject without granting access |
 | `/ticket purge` | Administration; confirmation required; delete all ticket channels/data in this server and reset numbering |
 | `/ticket reconcile <channel_id> <reason>` | Administration; close a record only after Discord confirms its channel was deleted |
@@ -580,10 +580,12 @@ ticket event history, which preserves previous close/reopen cycles. Use
 `/audit commande:ticket` to filter these actions and `/config` to inspect the panels. Staff who
 send messages or perform actions are recorded separately.
 
-Closing retains the channel, makes its explicit participants read-only (Discord
-administrators still bypass overwrites), saves the transcript and optionally
+Closing retains the channel for staff review, removes visibility for the creator
+and added members, saves their previous permissions, and makes the remaining staff
+access read-only. Staff-role access and the bot's permissions are retained; Discord
+administrators still bypass overwrites. The bot saves the transcript and optionally
 uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
-remains available through `transcript`. Reopening restores the saved permissions;
+remains available through `transcript`. Reopening by staff restores the saved permissions for the creator and previously added members;
 a second open ticket for the same creator prevents reopening. MySQL transactions,
 a per-server lock and a unique constraint prevent duplicate opens. On ordinary
 Discord or database failures, completed channel changes are undone. Discord and

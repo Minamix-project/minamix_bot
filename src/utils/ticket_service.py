@@ -158,11 +158,16 @@ async def deserialize_overwrites(guild, serialized):
     return result
 
 
-def archive_overwrites(guild, overwrites):
+def archive_overwrites(guild, overwrites, staff_role_ids, *, creator_id):
     result = {}
     for target, overwrite in overwrites.items():
         copy = discord.PermissionOverwrite.from_pair(*overwrite.pair())
         if target.id != guild.me.id:
+            staff_target = (
+                target.id in staff_role_ids if isinstance(target, discord.Role) else is_staff(target, staff_role_ids)
+            )
+            if not staff_target or target.id == creator_id:
+                copy.view_channel = False
             copy.update(
                 send_messages=False,
                 send_messages_in_threads=False,
@@ -470,7 +475,10 @@ class TicketService:
                         raise TicketError("Indique une raison de fermeture de 1 à 1 000 caractères.")
                     old = channel.overwrites
                     await channel.edit(
-                        overwrites=archive_overwrites(interaction.guild, old), reason="Fermeture du ticket"
+                        overwrites=archive_overwrites(
+                            interaction.guild, old, ticket.staff_role_ids, creator_id=ticket.creator_id
+                        ),
+                        reason="Fermeture du ticket",
                     )
                     undo.append(lambda: channel.edit(overwrites=old))
                     await session.close(ticket, interaction.user.id, reason, serialize_overwrites(old))
