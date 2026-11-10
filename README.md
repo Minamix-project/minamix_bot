@@ -229,7 +229,7 @@ cooldown are committed atomically.
 | `/listecoignore` | List excluded channels — admin |
 | `/setlogs <channel>` | Configure general logs — admin |
 | `/setdevlog <channel>` | Configure the bot's devlog channel — admin |
-| `/devlog [version] [preview]` | Publish or preview a GitHub release series — admin |
+| `/devlog [version] [preview]` | Publish or preview releases and catch up missing versions — admin |
 | `/setwarnlogs <channel>` | Configure warning logs — admin |
 | `/setafklogs <channel>` | Configure absence logs — admin |
 | `/seterrorlogs <channel>` | Configure technical error logs — admin |
@@ -282,12 +282,18 @@ private preview without changing the public channel. Both commands require
 Administrator or Manage Server, and appear under **Admin · Configuration** in
 `/help`. `/config` also displays the devlog channel.
 
-The command loads the selected release's entire `major.minor` series up to that
-version. For example, publishing `v1.8.3` includes available releases `v1.8.0`
-through `v1.8.3`. A major version starts its own message with `kchoc`; a minor
-version starts another with `kgun`; patches use `-` and are appended to their
-major or minor message. Thus `v2.0.1` is added below `v2.0.0`, while `v2.1.0`
-starts another message. Actual version numbers determine the category, rather
+The first publication loads the selected release's entire `major.minor` series
+up to that version. For example, publishing `v1.8.3` includes available releases
+`v1.8.0` through `v1.8.3`. Later publications also catch up releases after the
+previously tracked series. If `v1.9.0` was published and the latest release is
+`v1.11.0`, one new message contains `v1.10.0`, its patches, and `v1.11.0`, in
+ascending version order. If `v1.11.0` was already published alone, its existing
+message is updated to include the missing releases above it. Patches for an
+already tracked series stay in that series' existing message; grouped catch-up
+messages also remain grouped when later patches are published.
+
+Major versions use `kchoc`, minor versions use `kgun`, and patches use `-`.
+Actual version numbers determine the category, rather
 than PR title prefixes. The bot uses available custom emojis named `kchoc` and
 `kgun`, falling back to 🚀 and 🎯. External custom emojis additionally require
 Use External Emojis in the destination.
@@ -310,8 +316,8 @@ its database record was saved. A crash followed by more than 100 newer channel
 messages can prevent this recovery. Only bot-authored announcements can be
 updated; pre-existing messages posted manually by other users cannot be adopted.
 
-At Discord's 2,000-character limit, the series continues in additional messages,
-which are subsequently edited too. Each series is limited to 10 messages, and
+At Discord's 2,000-character limit, a batch continues in additional messages,
+which are subsequently edited too. Each batch is limited to 10 messages, and
 GitHub discovery scans at most 1,000 releases. Requests that cannot establish the
 complete series within this bound fail without publishing a partial list. There
 is no automatic publication on startup or merge: an administrator runs `/devlog`.

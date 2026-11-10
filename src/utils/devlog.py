@@ -95,7 +95,7 @@ def release_entry(data):
     return Release(version.tag, title[:300], url)
 
 
-def _fetch_release_group(version):
+def _fetch_release_group(version, since=None):
     target_data = _request_json(f"releases/tags/{Version.parse(version).tag}" if version else "releases/latest")
     target = release_entry(target_data)
     releases = {target.tag: target}
@@ -107,19 +107,20 @@ def _fetch_release_group(version):
                 entry = release_entry(item)
             except DevlogError:
                 continue
-            if entry.version.group == target.version.group and entry.version <= target.version:
+            selected = entry.version > since if since is not None else entry.version.group == target.version.group
+            if selected and entry.version <= target.version:
                 releases[entry.tag] = entry
                 found_base |= entry.version.patch == 0
-        if found_base or len(data) < 100:
+        if (since is None and found_base) or len(data) < 100:
             return tuple(sorted(releases.values(), key=lambda entry: entry.version))
     raise DevlogError("Cette série est trop ancienne ou trop longue pour être chargée intégralement (1 000 releases maximum).")
 
 
-async def fetch_release_group(version=None):
+async def fetch_release_group(version=None, *, since=None):
     if version is not None:
         version = Version.parse(version).tag
     try:
-        return await asyncio.to_thread(_fetch_release_group, version)
+        return await asyncio.to_thread(_fetch_release_group, version, since)
     except HTTPError as exc:
         if exc.code == 404:
             raise DevlogError("Aucune release publiée ne correspond à cette version.") from exc
@@ -199,7 +200,7 @@ async def configure_devlog(guild_id, channel_id):
         db.close()
 
 
-async def _existing_messages(channel, bot_id, group, message_ids, newest):
+async def _existing_messages(channel, bot_id, groups, message_ids, newest):
     messages = {}
     for message_id in message_ids:
         try:
@@ -214,7 +215,7 @@ async def _existing_messages(channel, bot_id, group, message_ids, newest):
         if message.author.id != bot_id:
             continue
         matches = ANNOUNCEMENT_PATTERN.findall(message.content)
-        if matches and all(Version.parse(tag).group == group for tag in matches):
+        if matches and all(Version.parse(tag).group in groups for tag in matches):
             if any(Version.parse(tag) > newest for tag in matches):
                 raise DevlogError("Un devlog plus récent existe déjà. Publie sa version ou une version ultérieure.")
             messages[message.id] = message
@@ -224,7 +225,7 @@ async def _existing_messages(channel, bot_id, group, message_ids, newest):
 
 
 async def publish_devlog(bot, guild, member, releases, *, preview=False):
-    group = releases[-1].version.group
+    target = max(entry.version for entry in releases)
     db = await get_db_connection()
     try:
         await db.begin()
@@ -240,47 +241,87 @@ async def publish_devlog(bot, guild, member, releases, *, preview=False):
             channel = guild.get_channel(int(configured[0]))
             validate_channel(channel, guild, member)
             await cursor.execute(
-                "SELECT entries, message_ids FROM guild_devlogs "
-                "WHERE guild_id = %s AND channel_id = %s AND release_group = %s",
-                (guild.id, channel.id, group),
+                "SELECT release_group, entries, message_ids FROM guild_devlogs "
+                "WHERE guild_id = %s AND channel_id = %s",
+                (guild.id, channel.id),
             )
-            row = await cursor.fetchone()
-            entries = {entry.tag: entry for entry in (Release(**item) for item in json.loads(row[0]))} if row else {}
-            entries.update({entry.tag: entry for entry in releases})
-            merged = sorted(entries.values(), key=lambda entry: entry.version)
+            rows = await cursor.fetchall()
+            batches = [
+                (group, tuple(Release(**item) for item in json.loads(entries)), json.loads(ids))
+                for group, entries, ids in rows
+            ]
+            anchor = max((
+                entry.version for _, entries, _ in batches for entry in entries
+                if entry.version < target and entry.version.group != target.group
+            ), default=None)
+            if anchor is not None:
+                releases = await fetch_release_group(target.tag, since=anchor)
+            incoming = {entry.tag: entry for entry in releases}
+            pending = []
+            # A catch-up batch can span several minor versions. Keep that batch
+            # together when any of its series receives another patch later.
+            for group, entries, ids in batches:
+                groups = {entry.version.group for entry in entries}
+                additions = {tag: entry for tag, entry in incoming.items() if entry.version.group in groups}
+                if additions:
+                    merged = {entry.tag: entry for entry in entries}
+                    merged.update(additions)
+                    pending.append((group, tuple(merged.values()), ids))
+                    for tag in additions:
+                        del incoming[tag]
+            if incoming:
+                entries = tuple(sorted(incoming.values(), key=lambda entry: entry.version))
+                for index, (group, existing, ids) in enumerate(pending):
+                    if any(entry.version.group == target.group for entry in existing):
+                        pending[index] = (group, (*entries, *existing), ids)
+                        break
+                else:
+                    pending.append((entries[0].version.group, entries, []))
+            pending.sort(key=lambda batch: min(entry.version for entry in batch[1]))
             major_emoji, minor_emoji = devlog_emojis(bot, channel)
-            pages = render_pages(merged, bot.user.id, major_emoji=major_emoji, minor_emoji=minor_emoji)
+            plans = []
+            for group, entries, ids in pending:
+                pages = render_pages(entries, bot.user.id, major_emoji=major_emoji, minor_emoji=minor_emoji)
+                plans.append((group, entries, ids, pages))
+            all_pages = tuple(page for _, _, _, pages in plans for page in pages)
             if preview:
                 await db.rollback()
-                return Publication(pages, channel.id)
-            existing = await _existing_messages(
-                channel, bot.user.id, group, json.loads(row[1]) if row else [], merged[-1].version,
-            )
-            message_ids = []
+                return Publication(all_pages, channel.id)
+            # Validate every destination before sending or editing any batch.
+            destinations = []
+            for _group, entries, ids, _pages in plans:
+                destinations.append(await _existing_messages(
+                    channel, bot.user.id, {entry.version.group for entry in entries}, ids,
+                    max(entry.version for entry in entries),
+                ))
+            all_message_ids = []
             created = edited = 0
             mentions = discord.AllowedMentions(everyone=False, roles=False, users=[bot.user], replied_user=False)
-            for index, content in enumerate(pages):
-                if index < len(existing):
-                    message = existing[index]
-                    if message.content != content:
-                        await message.edit(content=content, allowed_mentions=mentions, suppress=True)
-                        edited += 1
-                else:
-                    message = await channel.send(content, allowed_mentions=mentions, suppress_embeds=True)
-                    created += 1
-                message_ids.append(message.id)
-            for message in existing[len(pages):]:
-                await message.delete()
-            entries_json = json.dumps([asdict(entry) for entry in merged], ensure_ascii=False)
-            ids_json = json.dumps(message_ids)
-            await cursor.execute(
-                "INSERT INTO guild_devlogs (guild_id, channel_id, release_group, entries, message_ids) "
-                "VALUES (%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE "
-                "entries = %s, message_ids = %s",
-                (guild.id, channel.id, group, entries_json, ids_json, entries_json, ids_json),
-            )
+            for (group, entries, _ids, pages), existing in zip(plans, destinations):
+                message_ids = []
+                for index, content in enumerate(pages):
+                    if index < len(existing):
+                        message = existing[index]
+                        if message.content != content:
+                            await message.edit(content=content, allowed_mentions=mentions, suppress=True)
+                            edited += 1
+                    else:
+                        message = await channel.send(content, allowed_mentions=mentions, suppress_embeds=True)
+                        created += 1
+                    message_ids.append(message.id)
+                for message in existing[len(pages):]:
+                    await message.delete()
+                entries_json = json.dumps([asdict(entry) for entry in entries], ensure_ascii=False)
+                ids_json = json.dumps(message_ids)
+                await cursor.execute(
+                    "INSERT INTO guild_devlogs (guild_id, channel_id, release_group, entries, message_ids) "
+                    "VALUES (%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE "
+                    "entries = %s, message_ids = %s",
+                    (guild.id, channel.id, group, entries_json, ids_json, entries_json, ids_json),
+                )
+                all_message_ids.extend(message_ids)
         await db.commit()
-        return Publication(pages, channel.id, tuple(message_ids), created, edited)
+        return Publication(all_pages, channel.id, tuple(all_message_ids), created, edited)
     except BaseException:
         await db.rollback()
         raise

@@ -64,6 +64,27 @@ def test_github_discovery_fails_instead_of_publishing_an_incomplete_series(monke
     assert fetch.call_count == 11
 
 
+def test_catch_up_discovery_includes_all_missing_series_and_patches_across_pages(monkeypatch):
+    fetch = Mock(side_effect=[github_release("v1.11.1"), [
+        github_release("v1.12.0"), github_release("v1.11.1"), github_release("v1.11.0"),
+        *[github_release("v1.11.2-beta", prerelease=True)] * 97,
+    ], [
+        github_release("v1.10.2"), github_release("v1.10.1", draft=True),
+        github_release("v1.10.0"), github_release("v1.9.1"), github_release("v1.9.0"),
+    ]])
+    monkeypatch.setattr(devlog, "_request_json", fetch)
+    entries = asyncio.run(devlog.fetch_release_group("1.11.1", since=devlog.Version.parse("1.9.0")))
+    assert [entry.tag for entry in entries] == ["v1.9.1", "v1.10.0", "v1.10.2", "v1.11.0", "v1.11.1"]
+    assert fetch.call_args_list[-1].args == ("releases?per_page=100&page=2",)
+
+
+def test_catch_up_discovery_rejects_a_truncated_release_history(monkeypatch):
+    fetch = Mock(side_effect=[github_release("v1.11.0")] + [[github_release("v1.11.0")] * 100] * 10)
+    monkeypatch.setattr(devlog, "_request_json", fetch)
+    with pytest.raises(devlog.DevlogError, match="1 000 releases"):
+        asyncio.run(devlog.fetch_release_group("1.11.0", since=devlog.Version.parse("1.9.0")))
+
+
 @pytest.mark.parametrize("status,notice", [(404, "Aucune release"), (403, "limite temporairement"), (429, "limite temporairement")])
 def test_github_errors_are_actionable(monkeypatch, status, notice):
     monkeypatch.setattr(devlog, "_request_json", Mock(side_effect=HTTPError("url", status, "error", {}, None)))
@@ -142,9 +163,12 @@ def fake_destination():
     return bot, guild, member, channel, messages
 
 
-def fake_database(monkeypatch, *, row=None, configured=True):
+def fake_database(monkeypatch, *, row=None, rows=None, configured=True):
     cursor = AsyncMock()
-    cursor.fetchone.side_effect = [("456",) if configured else None, row]
+    cursor.fetchone.return_value = ("456",) if configured else None
+    if rows is None:
+        rows = [(devlog.Release(**json.loads(row[0])[0]).version.group, *row)] if row else []
+    cursor.fetchall.return_value = rows
     context = AsyncMock()
     context.__aenter__.return_value = cursor
     db = Mock(begin=AsyncMock(), rollback=AsyncMock(), commit=AsyncMock())
@@ -156,6 +180,124 @@ def fake_database(monkeypatch, *, row=None, configured=True):
 def saved_row(cursor):
     values = cursor.execute.await_args.args[1]
     return values[3], values[4]
+
+
+def stored_batch(group, entries, message_ids):
+    return group, json.dumps([devlog.asdict(entry) for entry in entries]), json.dumps(message_ids)
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_catch_up_groups_missing_minors_and_patches_in_one_new_message(monkeypatch, preview):
+    bot, guild, member, channel, messages = fake_destination()
+    entries = [release("v1.10.0"), release("v1.10.1"), release("v1.11.0"), release("v1.11.1")]
+    fetch = AsyncMock(return_value=tuple(entries))
+    monkeypatch.setattr(devlog, "fetch_release_group", fetch)
+
+    async def scenario():
+        previous = await channel.send(render([release("v1.9.0")])[0])
+        db, cursor = fake_database(monkeypatch, rows=[stored_batch("1.9", [release("v1.9.0")], [previous.id])])
+        result = await devlog.publish_devlog(bot, guild, member, [entries[-1]], preview=preview)
+        assert [devlog.ANNOUNCEMENT_PATTERN.findall(page) for page in result.pages] == [[entry.tag for entry in entries]]
+        assert result.created == (0 if preview else 1)
+        assert result.edited == 0
+        previous.edit.assert_not_awaited()
+        assert len(messages) == (1 if preview else 2)
+        if preview:
+            db.rollback.assert_awaited_once()
+            db.commit.assert_not_awaited()
+            assert cursor.execute.await_count == 2
+        else:
+            assert cursor.execute.await_args.args[1][2] == "1.10"
+        fetch.assert_awaited_once_with("v1.11.1", since=devlog.Version.parse("v1.9.0"))
+    asyncio.run(scenario())
+
+
+def test_catch_up_repairs_an_already_published_latest_minor_and_retries_without_duplicates(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+    entries = [release("v1.10.0"), release("v1.10.1"), release("v1.11.0")]
+    fetch = AsyncMock(return_value=tuple(entries))
+    monkeypatch.setattr(devlog, "fetch_release_group", fetch)
+
+    async def scenario():
+        previous = await channel.send(render([release("v1.9.0")])[0])
+        latest = await channel.send(render([entries[-1]])[0])
+        first_row = stored_batch("1.9", [release("v1.9.0")], [previous.id])
+        _db, cursor = fake_database(monkeypatch, rows=[first_row, stored_batch("1.11", [entries[-1]], [latest.id])])
+        result = await devlog.publish_devlog(bot, guild, member, [entries[-1]])
+        assert result.created == 0 and result.edited == 1
+        assert result.message_ids == (latest.id,)
+        assert devlog.ANNOUNCEMENT_PATTERN.findall(latest.content) == [entry.tag for entry in entries]
+        values = cursor.execute.await_args.args[1]
+        saved = values[2:5]
+        fake_database(monkeypatch, rows=[first_row, saved])
+        result = await devlog.publish_devlog(bot, guild, member, [entries[-1]])
+        assert result.created == result.edited == 0
+        assert len(messages) == 2
+        previous.edit.assert_not_awaited()
+    asyncio.run(scenario())
+
+
+def test_patches_update_the_existing_multi_minor_batch_even_for_an_older_minor(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+    entries = [release("v1.10.0"), release("v1.11.0")]
+
+    async def scenario():
+        original = await channel.send(render(entries)[0])
+        fake_database(monkeypatch, rows=[stored_batch("1.10", entries, [original.id])])
+        result = await devlog.publish_devlog(bot, guild, member, [release("v1.10.1")])
+        assert result.created == 0 and result.edited == 1
+        assert devlog.ANNOUNCEMENT_PATTERN.findall(original.content) == ["v1.10.0", "v1.10.1", "v1.11.0"]
+        assert len(messages) == 1
+    asyncio.run(scenario())
+
+
+def test_catch_up_updates_last_series_patches_separately_from_the_new_batch(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+    fetch = AsyncMock(return_value=(release("v1.9.1"), release("v1.10.0"), release("v1.11.0")))
+    monkeypatch.setattr(devlog, "fetch_release_group", fetch)
+
+    async def scenario():
+        previous = await channel.send(render([release("v1.9.0")])[0])
+        fake_database(monkeypatch, rows=[stored_batch("1.9", [release("v1.9.0")], [previous.id])])
+        result = await devlog.publish_devlog(bot, guild, member, [release("v1.11.0")])
+        assert result.created == 1 and result.edited == 1
+        assert devlog.ANNOUNCEMENT_PATTERN.findall(previous.content) == ["v1.9.0", "v1.9.1"]
+        assert devlog.ANNOUNCEMENT_PATTERN.findall(messages[result.message_ids[-1]].content) == ["v1.10.0", "v1.11.0"]
+    asyncio.run(scenario())
+
+
+def test_catch_up_recovers_a_multi_minor_send_after_database_failure(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+    entries = (release("v1.10.0"), release("v1.11.0"))
+    monkeypatch.setattr(devlog, "fetch_release_group", AsyncMock(return_value=entries))
+
+    async def scenario():
+        previous = await channel.send(render([release("v1.9.0")])[0])
+        rows = [stored_batch("1.9", [release("v1.9.0")], [previous.id])]
+        db, _cursor = fake_database(monkeypatch, rows=rows)
+        db.commit.side_effect = RuntimeError("Database unavailable")
+        with pytest.raises(RuntimeError):
+            await devlog.publish_devlog(bot, guild, member, [entries[-1]])
+        fake_database(monkeypatch, rows=rows)
+        result = await devlog.publish_devlog(bot, guild, member, [entries[-1]])
+        assert result.created == result.edited == 0
+        assert len(messages) == channel.send.await_count == 2
+    asyncio.run(scenario())
+
+
+def test_failed_catch_up_discovery_leaves_existing_messages_unchanged(monkeypatch):
+    bot, guild, member, channel, messages = fake_destination()
+    monkeypatch.setattr(devlog, "fetch_release_group", AsyncMock(side_effect=devlog.DevlogError("GitHub indisponible")))
+
+    async def scenario():
+        previous = await channel.send(render([release("v1.9.0")])[0])
+        db, _cursor = fake_database(monkeypatch, rows=[stored_batch("1.9", [release("v1.9.0")], [previous.id])])
+        with pytest.raises(devlog.DevlogError, match="GitHub indisponible"):
+            await devlog.publish_devlog(bot, guild, member, [release("v1.11.0")])
+        previous.edit.assert_not_awaited()
+        assert len(messages) == channel.send.await_count == 1
+        db.rollback.assert_awaited_once()
+    asyncio.run(scenario())
 
 
 def test_preview_is_private_and_does_not_mutate_database_or_discord(monkeypatch):
@@ -311,6 +453,7 @@ def test_mysql_devlog_migration_concurrency_and_persistence(monkeypatch):
         )
 
     monkeypatch.setattr(devlog, "get_db_connection", connect)
+    monkeypatch.setattr(devlog, "fetch_release_group", AsyncMock(side_effect=lambda version, **kwargs: (release(version),)))
     bot, guild, member, channel, messages = fake_destination()
 
     async def scenario():
@@ -341,12 +484,24 @@ def test_mysql_devlog_migration_concurrency_and_persistence(monkeypatch):
         assert "v2.0.1" in result.pages[0]
         await devlog.publish_devlog(bot, guild, member, [release("v2.1.0")])
         assert len(messages) == 3
+        catch_up = (release("v2.2.0"), release("v2.2.1"), release("v2.3.0"))
+        monkeypatch.setattr(devlog, "fetch_release_group", AsyncMock(return_value=catch_up))
+        result = await devlog.publish_devlog(bot, guild, member, [catch_up[-1]])
+        assert result.created == 1 and len(messages) == 4
+        batch_id = result.message_ids[0]
+        assert devlog.ANNOUNCEMENT_PATTERN.findall(messages[batch_id].content) == [entry.tag for entry in catch_up]
+        monkeypatch.setattr(devlog, "fetch_release_group", AsyncMock(return_value=(release("v2.3.0"), release("v2.3.1"))))
+        result = await devlog.publish_devlog(bot, guild, member, [release("v2.3.1")])
+        assert result.created == 0 and result.edited == 1
+        assert result.message_ids == (batch_id,)
+        assert "v2.2.1" in messages[batch_id].content
+        assert "v2.3.1" in messages[batch_id].content
         db = await connect()
         try:
             async with db.cursor() as cursor:
                 await cursor.execute("SELECT release_group, message_ids FROM guild_devlogs WHERE guild_id = 1 ORDER BY release_group")
                 rows = await cursor.fetchall()
-                assert [row[0] for row in rows] == ["1.8", "2.0", "2.1"]
+                assert [row[0] for row in rows] == ["1.8", "2.0", "2.1", "2.2"]
                 assert json.loads(rows[0][1]) == [first_id]
                 await cursor.execute("SELECT COUNT(*) FROM guild_devlogs WHERE guild_id = 2")
                 assert (await cursor.fetchone())[0] == 0
