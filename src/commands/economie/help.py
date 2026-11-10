@@ -12,7 +12,7 @@ ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation
 
 _GENERAL = (
     "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
-    "`/ticket close <reason>` · `/ticket transcript` · `/ticket info` — Gérer ton ticket\n"
+    "Pour fermer ton ticket, utilise le bouton **Fermer le ticket**, puis confirme.\n"
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
     "`/back` — Mettre fin à ton absence\n"
