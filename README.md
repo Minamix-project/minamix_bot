@@ -73,6 +73,19 @@ management commands use the same **Manage Server** or **Administrator**
 permission. These rules are enforced both by Discord command visibility and by
 the bot at runtime.
 
+## Delete messages with a reaction
+
+On allowed servers, user `840870799064956930` can react with the standard ❌
+(`:x:`) emoji to delete the reacted-to message, regardless of its author. Other
+users retain only the existing ability to delete their own tracked RP messages.
+Both actions use a single reaction listener, so the same event is not handled
+by competing deletion features. Other emojis are ignored; direct messages and
+unauthorized servers are excluded. Raw reaction events also support messages
+outside the bot's cache. The bot needs access to the channel and Manage Messages
+to delete other users' messages. Normal message-deletion logs/history still apply.
+Already deleted messages are ignored; Discord permission/API failures retain RP
+ownership for retries and use the configured technical error reporting.
+
 ## Commands
 
 ### General and absence
