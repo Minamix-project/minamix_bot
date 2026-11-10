@@ -66,6 +66,20 @@ Variables use `NAME=value` syntax, never `NAME: value`. Use long, distinct
 passwords for `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`, and
 `BACKUP_TEST_ROOT_PASSWORD`.
 
+## Rotating Discord presence
+
+The bot rotates its Discord activity every five minutes, starting when it is ready:
+
+- Watching: `Les bots prendre le pouvoir`
+- Listening: `Les plaintes des utilisateurs`
+- Playing: `La version <version> de <bot name>`
+- Competing: `La lutte pour l'égalité entre bots et humains`
+
+The playing activity uses the running `BOT_VERSION` and the current Discord bot
+name. Missing/development version metadata displays `de développement`. The worker
+stays single across reconnects, retries failed updates without skipping an activity,
+and is canceled when the cog or bot shuts down.
+
 ## Permissions
 
 Administrative commands require **Manage Server** or **Administrator**. RP
