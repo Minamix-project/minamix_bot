@@ -89,9 +89,14 @@ services:
           timestamp=$$(date -u +%Y-%m-%dT%H-%M-%SZ)
           target="/backups/$$DB_NAME-$$timestamp.sql"
           temp="$$target.tmp"
-          MYSQL_PWD="$$DB_PASSWORD" mysqldump --no-tablespaces -h db -u "$$DB_USER" "$$DB_NAME" > "$$temp"
+          if ! MYSQL_PWD="$$DB_PASSWORD" mysqldump --no-tablespaces -h db -u "$$DB_USER" "$$DB_NAME" > "$$temp"; then
+            rm -f "$$temp"
+            return 1
+          fi
           mv "$$temp" "$$target"
-          find /backups -type f -name '*.sql' -mtime "+$$BACKUP_RETENTION_DAYS" -delete
+          retention_minutes=$$((BACKUP_RETENTION_DAYS * 1440))
+          find /backups -maxdepth 1 -type f -name "$$DB_NAME-*.sql" -mmin "+$$retention_minutes" -delete
+          find /backups -maxdepth 1 -type f -name "$$DB_NAME-*.sql.tmp" -empty -mmin +60 -delete
         }
         trap 'backup; exit 0' INT TERM
         while true; do

@@ -93,7 +93,7 @@ ownership for retries and use the configured technical error reporting.
 | Command | Description |
 | --- | --- |
 | `/help` | Show the interactive help |
-| `/status` | Show public bot status and information |
+| `/status` | Show bot status, main-branch repository statistics and the latest stable main release |
 | `/changelog` | Show recent GitHub releases |
 | `/afk` | Set your absence status |
 | `/back` | Clear your absence status |
@@ -103,6 +103,25 @@ ownership for retries and use the configured technical error reporting.
 | `/reminder list` | List your pending reminders and delivery failures in this server |
 | `/reminder edit <reminder_id> [...]` | Update one of your pending or failed reminders |
 | `/reminder delete <reminder_id>` | Delete one of your pending or failed reminders |
+
+### Repository statistics in status
+
+`/status` displays code lines, files, commits, detected languages, and the latest
+published stable release targeting `main`, alongside the normal latency, uptime,
+server and member counts. The file count includes every regular file in the
+main-branch archive. Lines count nonblank lines in recognized source/configuration
+files (comments included); Markdown documentation and binary assets are excluded
+from line/language counts. Python, SQL, HTML, YAML and other recognized source or
+configuration formats are listed by their share of counted lines.
+
+Counts are pinned to one main commit: they use GitHub's public API and an in-memory
+source archive, so the production container needs neither Git nor a `.git` directory.
+No source files are extracted. Downloads, archive size, file count and request time
+are bounded. Results are cached for ten minutes; concurrent requests share one
+refresh. On a temporary GitHub failure, cached values are marked as stale, or the
+repository fields show as unavailable while basic bot status remains available.
+The latest release is a published main release, not necessarily the version running
+in the current container. GitHub request failures are retried after two minutes.
 
 ### Reminders
 
@@ -416,8 +435,15 @@ page as `/roll help`; `/roll` is no longer listed under Roleplay.
 
 ## Backups
 
-The `backup` service creates periodic SQL dumps and removes files older than
-`BACKUP_RETENTION_DAYS`. Dumps are created with owner-only permissions. The
+The `backup` service creates periodic SQL dumps and removes completed dumps older
+than `BACKUP_RETENTION_DAYS` at each successful backup. The interval defaults to
+six hours and retention to fourteen days; `.env` may override these values.
+Rotation uses minute-level ages rather than rounded whole days, and is restricted
+to dump filenames for the configured database. Failed dumps remove their temporary
+file; subsequent successful runs remove leftover empty `.sql.tmp` files older than
+one hour. Recent temporary files and nonempty partial dumps are retained. Valid
+backups are not rotated away if the new dump fails. Dumps are created with
+owner-only permissions. The
 `backup-test` service regularly restores the latest dump into a temporary
 database and exposes its status to the bot.
 
