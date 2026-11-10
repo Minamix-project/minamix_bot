@@ -7,10 +7,12 @@ from src.utils.dice import get_help as get_dice_help
 from src.utils.permissions import is_admin
 
 
-ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation", "system", "message_history"})
+ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation", "system", "message_history", "admin_tickets"})
 
 
 _GENERAL = (
+    "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
+    "Pour fermer ton ticket, utilise le bouton **Fermer le ticket**, puis confirme.\n"
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
     "`/back` — Mettre fin à ton absence\n"
@@ -69,6 +71,26 @@ _MODERATION = (
     "`/removeecoignore <channel>` — Réactiver les gains dans un salon\n"
     "`/listecoignore` — Lister les salons économiques ignorés"
 )
+
+_ADMIN_TICKETS = (
+    "`/ticket panel` — Créer, modifier, déplacer ou supprimer des panneaux avec l'assistant\n"
+    "`/ticket add <user>` — Ajouter un membre au ticket\n"
+    "`/ticket remove <user>` — Retirer un membre du ticket\n"
+    "`/ticket rename <name>` — Renommer le salon du ticket\n"
+    "`/ticket close <reason>` — Fermer le ticket et sauvegarder son historique\n"
+    "`/ticket reopen` — Rouvrir le ticket et restaurer ses accès\n"
+    "`/ticket transcript` — Télécharger l'historique du ticket\n"
+    "`/ticket info` — Voir le créateur, la catégorie, les dates et les interventions\n"
+    "`/ticket link <user>` — Lier un utilisateur concerné sans lui donner accès\n"
+    "`/ticket reconcile <channel_id> <reason>` — Régulariser un ticket dont le salon a été supprimé\n"
+    "`/ticket purge` — Supprimer les tickets et leurs données, puis repartir à 0001 (confirmation)\n\n"
+    "**Accès :** panneaux, régularisation et purge réservés à l'administration. "
+    "La gestion des tickets est aussi ouverte aux rôles de support configurés.\n"
+    "Le bouton de fermeture avec confirmation est réservé au créateur ; le personnel utilise `/ticket close`.\n"
+    "Les transcripts ont un salon dédié ; les logs d'actions utilisent `/setlogs`. "
+    "Consulte `/audit commande:ticket` pour l'historique administratif."
+)
+
 
 _MESSAGE_HISTORY = (
     "`/messagehistory recent [channel] [user] [event]` — Voir les changements et ouvrir les versions depuis le menu\n"
@@ -148,6 +170,7 @@ async def register(bot):
             options.extend([
                 discord.SelectOption(label="Admin · Économie", value="admin_economy", emoji="🔒"),
                 discord.SelectOption(label="Admin · Modération", value="moderation", emoji="🛡️"),
+                discord.SelectOption(label="Admin · Tickets", value="admin_tickets", emoji="🎫"),
                 discord.SelectOption(label="Admin · Configuration", value="system", emoji="⚙️"),
             ])
         if admin:
@@ -164,6 +187,7 @@ async def register(bot):
             "rp_management": ("📝 Gestion RP", _RP_MANAGEMENT, discord.Color.purple()),
             "admin_economy": ("🔒 Administration · Économie", _ADMIN_ECONOMY, discord.Color.red()),
             "moderation": ("🛡️ Administration · Modération", _MODERATION, discord.Color.red()),
+            "admin_tickets": ("🎫 Administration · Tickets", _ADMIN_TICKETS, discord.Color.red()),
             "system": ("⚙️ Administration · Configuration", _SYSTEM, discord.Color.red()),
             "message_history": ("📋 Administration · Suivi des messages", history_help, discord.Color.red()),
         }

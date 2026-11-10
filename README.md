@@ -73,6 +73,19 @@ management commands use the same **Manage Server** or **Administrator**
 permission. These rules are enforced both by Discord command visibility and by
 the bot at runtime.
 
+## Delete messages with a reaction
+
+On allowed servers, user `840870799064956930` can react with the standard ❌
+(`:x:`) emoji to delete the reacted-to message, regardless of its author. Other
+users retain only the existing ability to delete their own tracked RP messages.
+Both actions use a single reaction listener, so the same event is not handled
+by competing deletion features. Other emojis are ignored; direct messages and
+unauthorized servers are excluded. Raw reaction events also support messages
+outside the bot's cache. The bot needs access to the channel and Manage Messages
+to delete other users' messages. Normal message-deletion logs/history still apply.
+Already deleted messages are ignored; Discord permission/API failures retain RP
+ownership for retries and use the configured technical error reporting.
+
 ## Commands
 
 ### General and absence
@@ -80,7 +93,7 @@ the bot at runtime.
 | Command | Description |
 | --- | --- |
 | `/help` | Show the interactive help |
-| `/status` | Show public bot status and information |
+| `/status` | Show bot status, main-branch repository statistics and the latest stable main release |
 | `/changelog` | Show recent GitHub releases |
 | `/afk` | Set your absence status |
 | `/back` | Clear your absence status |
@@ -90,6 +103,25 @@ the bot at runtime.
 | `/reminder list` | List your pending reminders and delivery failures in this server |
 | `/reminder edit <reminder_id> [...]` | Update one of your pending or failed reminders |
 | `/reminder delete <reminder_id>` | Delete one of your pending or failed reminders |
+
+### Repository statistics in status
+
+`/status` displays code lines, files, commits, detected languages, and the latest
+published stable release targeting `main`, alongside the normal latency, uptime,
+server and member counts. The file count includes every regular file in the
+main-branch archive. Lines count nonblank lines in recognized source/configuration
+files (comments included); Markdown documentation and binary assets are excluded
+from line/language counts. Python, SQL, HTML, YAML and other recognized source or
+configuration formats are listed by their share of counted lines.
+
+Counts are pinned to one main commit: they use GitHub's public API and an in-memory
+source archive, so the production container needs neither Git nor a `.git` directory.
+No source files are extracted. Downloads, archive size, file count and request time
+are bounded. Results are cached for ten minutes; concurrent requests share one
+refresh. On a temporary GitHub failure, cached values are marked as stale, or the
+repository fields show as unavailable while basic bot status remains available.
+The latest release is a published main release, not necessarily the version running
+in the current container. GitHub request failures are retried after two minutes.
 
 ### Reminders
 
@@ -403,8 +435,15 @@ page as `/roll help`; `/roll` is no longer listed under Roleplay.
 
 ## Backups
 
-The `backup` service creates periodic SQL dumps and removes files older than
-`BACKUP_RETENTION_DAYS`. Dumps are created with owner-only permissions. The
+The `backup` service creates periodic SQL dumps and removes completed dumps older
+than `BACKUP_RETENTION_DAYS` at each successful backup. The interval defaults to
+six hours and retention to fourteen days; `.env` may override these values.
+Rotation uses minute-level ages rather than rounded whole days, and is restricted
+to dump filenames for the configured database. Failed dumps remove their temporary
+file; subsequent successful runs remove leftover empty `.sql.tmp` files older than
+one hour. Recent temporary files and nonempty partial dumps are retained. Valid
+backups are not rotated away if the new dump fails. Dumps are created with
+owner-only permissions. The
 `backup-test` service regularly restores the latest dump into a temporary
 database and exposes its status to the bot.
 
@@ -475,3 +514,145 @@ Discord Developer Portal under **General Information**:
 https://minamix-project.github.io/minamix_bot/privacy.html
 https://minamix-project.github.io/minamix_bot/terms.html
 ```
+
+### Integrated support tickets
+
+Aurum provides persistent ticket panels with French labels and responses. Code
+and command names are in English. Open the private setup interface with no parameters:
+
+```text
+/ticket panel
+```
+
+Manage Server or Administrator is required. Choose **Créer un panneau** or
+**Gérer les panneaux**. The creation/editor wizard has five steps:
+
+1. **Nom et message**: a modal sets the manager name (1–80 characters), public
+   title (up to 256 characters), and multiline text (up to 4,000 characters).
+   Blank title/text fields use the default panel message.
+2. **Rôles de support**: select 1–10 dedicated roles through Discord's role picker.
+3. **Catégorie des tickets**: select the category for private ticket channels.
+4. **Salon des transcripts**: optionally select a private text channel for the
+   transcript files, or choose **Sans salon de transcripts**. Database storage
+   remains enabled regardless of this choice.
+5. **Envoi du panneau**: select the destination text channel, then press
+   **Enregistrer et envoyer**.
+
+Each step has **Retour** and **Enregistrer et continuer**. Navigation retains the
+current draft; changes are saved and published only on the final step. Canceling,
+leaving the wizard, or its ten-minute timeout discards the draft. Each editor is
+restricted to its requesting administrator and rechecks permissions on interactions
+and modal submissions. A concurrently edited panel must be reopened before saving.
+
+The manager lists panels by ID and name, paginated in groups of 25. Each panel can
+be edited, sent/moved, or removed independently. Removal requires confirmation,
+disables that panel's public menu and retains its existing tickets. Moving a panel
+disables only its old message. Multiple panels can also share the same text channel.
+The migration preserves existing published panels, roles, transcript destinations,
+message IDs and ticket numbers.
+
+Public panels offer General support, RP issue, Shop, Report, Application and Staff
+request categories in French. Their menus work after restarts and clear after every
+selection, including rejected requests, so members can select the same category
+again. Each panel footer shows the bot's name and avatar, including its default avatar.
+
+**Transcripts and general logs are separate.** The private transcript channel is
+selected per panel in the wizard. Ticket action summaries use the existing general
+log destination configured with `/setlogs`; they do not contain transcript files or
+message bodies. Setting a transcript destination does not change the general logs.
+Ticket journals use the same moderation layout: action icon and color, named fields
+for the channel, ticket, category, creator and actor, a timestamp, the creator's
+avatar and the bot footer. Member changes also identify the affected member.
+Transcript notifications follow the same layout in their private destination.
+Expected access/validation refusals produce one private explanation and no technical
+alert. A locally handled ticket error is not reported again by the global command
+handler; unexpected failures report their underlying type and full command name
+such as `/ticket add`.
+
+The bot needs Manage Channels and Manage Permissions in the ticket category, plus
+View Channel, Send Messages, Read Message History, Embed Links and Attach Files in
+the relevant destinations. Enable the privileged Message Content and Server Members
+intents. `@everyone` and integration-managed roles cannot be support roles.
+
+Opening a ticket mentions only its creator with a French welcome message. A
+French embed explains that support will reply shortly and offers a persistent
+**Fermer le ticket** button, with the bot's name and avatar in its footer. Only
+the ticket creator can use that button, including after a bot restart. It opens
+a private **Es-tu sûr de vouloir fermer ce ticket ?** confirmation with a red
+**Fermer** button and **Annuler**. The confirmation expires after 60 seconds and
+can only be used once. Confirming rechecks the creator and ticket before using
+the normal transcript/archive flow; canceling leaves the ticket unchanged.
+Support staff use `/ticket close <reason>` instead of the button.
+
+Ticket numbers are independent per server and channel names use `ticket-0001`,
+`ticket-0002`, etc. Numbers longer than four digits are kept in full. Existing
+numbers are preserved by the migration; default channel names are padded on
+startup, while custom names remain unchanged.
+
+Each member can have one open ticket per server. New channels use explicit
+permissions for the creator, all configured support roles and the bot; other
+category permissions are not copied. Discord administrators can always access
+channels. Existing tickets retain the support roles and transcript destination configured
+when they were created. Category/role removal requires panel reconfiguration.
+
+| Command | Access and behavior |
+| --- | --- |
+| `/ticket add <user>` | Support role or administration; grant access to another member |
+| `/ticket remove <user>` | Support role or administration; deny that member access |
+| `/ticket rename <name>` | Support role or administration; rename the current ticket |
+| `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
+| `/ticket reopen` | Support role or administration; restore previous access permissions |
+| `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
+| `/ticket info` | Creator while open, or support; category, creator, dates, staff and closure details |
+| `/ticket link <user>` | Support role or administration; associate a subject without granting access |
+| `/ticket purge` | Administration; confirmation required; delete all ticket channels/data in this server and reset numbering |
+| `/ticket reconcile <channel_id> <reason>` | Administration; close a record only after Discord confirms its channel was deleted |
+
+All management replies are ephemeral and require visibility of the current
+ticket. Invited members can participate but cannot manage or export it. The
+creator and support access cannot be removed through these commands. The
+configured support roles can manage tickets even without Manage Server.
+`info` includes the linked subject for support staff; administrators additionally
+see their warning count and guidance for `/warnings` and `/audit`. Ticket
+mutations are recorded in the existing administrative audit log and in a detailed
+ticket event history, which preserves previous close/reopen cycles. Use
+`/audit commande:ticket` to filter these actions and `/config` to inspect the panels. Staff who
+send messages or perform actions are recorded separately.
+
+Closing retains the channel for staff review, removes visibility for the creator
+and added members, saves their previous permissions, and makes the remaining staff
+access read-only. Staff-role access and the bot's permissions are retained; Discord
+administrators still bypass overwrites. The bot saves the transcript and optionally
+uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
+remains available through `transcript`. Reopening by staff restores the saved permissions for the creator and previously added members;
+a second open ticket for the same creator prevents reopening. MySQL transactions,
+a per-server lock and a unique constraint prevent duplicate opens. On ordinary
+Discord or database failures, completed channel changes are undone. Discord and
+MySQL cannot commit atomically: a process termination between their operations
+can require manual reconciliation. A deleted channel can be reconciled without
+inventing a transcript; previously stored exports remain in the database.
+
+Transcripts include available messages in chronological order, author/message
+IDs, timestamps, replies, embed text, attachment links, ticket metadata and action
+history. They do not include deleted messages, past edits, thread histories or
+attachment binaries; Discord attachment URLs may expire. A closed ticket exports
+its closing snapshot; an open ticket creates a fresh snapshot. Exports are capped
+at 20,000 messages and the smaller of 8 MiB or the server upload limit. Exceeding
+a limit or failing to read history aborts closure and restores permissions, with
+no silently truncated transcript. Records and transcripts remain in MySQL until
+removed by an administrator with `/ticket purge` or through database maintenance and are covered by the
+normal database backups. No administrative web interface is introduced.
+
+
+Run `/ticket purge` outside a ticket channel. Its private confirmation expires
+after 60 seconds and is restricted to the requesting administrator. Permissions
+are checked again on confirmation, and the confirmation can only be used once.
+The preview itself does not delete anything. If the ticket list changes, a new
+confirmation is required. Purge deletes open and closed ticket channels, ticket
+metadata, staff participation, action history, database transcripts and retained
+message history for those channels. The panels remain configured, and the next
+ticket is `ticket-0001`. Other servers and unrelated message history are kept.
+If any channel deletion fails, records and numbering are retained for a retry;
+some channels may already have been deleted. A minimal purge audit record is kept.
+Copies already sent to Discord logs, downloaded exports and existing SQL backups
+are outside this database purge and follow their existing retention.

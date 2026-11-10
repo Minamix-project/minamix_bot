@@ -5,6 +5,7 @@ import asyncio
 from collections import defaultdict
 from discord import Message, RawReactionActionEvent
 from src.config import GUILD_IDS
+from src.utils.reaction_delete import handle_delete_reaction
 from src.utils.rp import claim_rp_cooldown, get_prefix_cache, is_rp_maintenance_enabled, normalize_discord_image_url
 
 _webhook_cache: dict[int, discord.Webhook] = {}
@@ -103,21 +104,5 @@ async def register(bot):
             logger.exception("RP webhook error")
 
     @bot.listen("on_raw_reaction_add")
-    async def on_reaction_rp_delete(payload: RawReactionActionEvent):
-        if str(payload.emoji) != "❌":
-            return
-        if payload.message_id not in _rp_messages:
-            return
-        if payload.user_id != _rp_messages[payload.message_id][0]:
-            return
-
-        channel = bot.get_channel(payload.channel_id)
-        if not channel:
-            return
-
-        try:
-            message = await channel.fetch_message(payload.message_id)
-            await message.delete()
-            del _rp_messages[payload.message_id]
-        except (discord.NotFound, discord.Forbidden):
-            _rp_messages.pop(payload.message_id, None)
+    async def on_reaction_delete(payload: RawReactionActionEvent):
+        await handle_delete_reaction(bot, payload, _rp_messages)
