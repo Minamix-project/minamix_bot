@@ -36,6 +36,8 @@ def destination():
     def member(user_id, *, staff=False, admin=False):
         value = Mock(spec=discord.Member)
         value.id, value.guild, value.bot = user_id, guild, False
+        value.display_name = f"Member {user_id}"
+        value.display_avatar = SimpleNamespace(url=f"https://example.test/avatar-{user_id}.png")
         value.roles = [everyone, staff_role] if staff else [everyone]
         value.guild_permissions = discord.Permissions(manage_guild=admin)
         return value
@@ -378,7 +380,7 @@ def test_member_management_reopen_and_subject_link_preserve_access(monkeypatch):
         assert env.current.overwrites[env.outsider].view_channel is True
         await manager.mutate(env.interaction, "removed", user=env.outsider)
         assert env.current.overwrites[env.outsider].view_channel is False
-        with pytest.raises(store.TicketError, match="automatiquement"):
+        with pytest.raises(store.TicketError, match="créateur"):
             await manager.mutate(env.interaction, "removed", user=env.creator)
         before = service.serialize_overwrites(env.current.overwrites)
         await manager.mutate(env.interaction, "linked", user=env.outsider)
@@ -927,7 +929,7 @@ def test_general_action_logs_and_transcript_files_have_separate_destinations(mon
         assert "file" not in env.current.send.await_args.kwargs
         assert await manager.send_transcript(env.guild, closed, b"private messages") is None
         assert env.panel.send.await_args.kwargs["file"].filename == "ticket-0001.txt"
-        assert "private messages" not in env.current.send.await_args.kwargs["embed"].description
+        assert "private messages" not in str(env.current.send.await_args.kwargs["embed"].to_dict())
 
     asyncio.run(scenario())
 

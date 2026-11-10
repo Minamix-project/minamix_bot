@@ -10,6 +10,7 @@ import re
 import discord
 
 from src.utils.ticket_controls import TicketCloseView, ticket_embed
+from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
 from src.utils.db import get_db_connection
 from src.utils.tickets import CATEGORIES, TicketError, ticket_session
@@ -477,8 +478,20 @@ class TicketService:
                 elif action in {"added", "removed"}:
                     if user.guild.id != interaction.guild_id or user.bot:
                         raise TicketError("Choisis un membre de ce serveur qui n'est pas un bot.")
-                    if user.id == ticket.creator_id or is_staff(user, ticket.staff_role_ids):
-                        raise TicketError("L'accès du créateur et du personnel est géré automatiquement.")
+                    if user.id == ticket.creator_id:
+                        raise TicketError(
+                            "Ce membre est le créateur du ticket ; il n'a pas besoin d'être ajouté."
+                            if action == "added"
+                            else "Tu ne peux pas retirer le créateur de son ticket."
+                        )
+                    if is_staff(user, ticket.staff_role_ids):
+                        raise TicketError(
+                            "Ce membre appartient au personnel autorisé. Son accès est géré par les rôles "
+                            "du panneau, sans `/ticket add`."
+                            if action == "added"
+                            else "Tu ne peux pas retirer un membre du personnel autorisé avec cette commande. "
+                            "Son accès est géré par les rôles du panneau."
+                        )
                     old = channel.overwrites
                     updated = dict(old)
                     updated[user] = (
@@ -509,7 +522,7 @@ class TicketService:
             if action == "closed":
                 content = await build_transcript(channel, ticket, session)
                 await session.save_transcript(ticket, interaction.user.id, content)
-        await self.log_action(interaction.guild, ticket, action, interaction.user.id)
+        await self.log_action(interaction.guild, ticket, action, interaction.user.id, detail=detail)
         return ticket, content
 
     async def transcript(self, interaction):
@@ -595,18 +608,17 @@ class TicketService:
             validate_text_channel(channel, guild, attachments=True)
             if channel.permissions_for(guild.default_role).view_channel:
                 raise TicketError("Le salon des transcripts est devenu public.")
-            embed = discord.Embed(
-                title=f"Ticket #{ticket.reference} fermé",
-                color=discord.Color.orange(),
-                description=f"Créateur : <@{ticket.creator_id}>\nCatégorie : {CATEGORIES[ticket.category]}\n"
-                f"Fermé par : <@{ticket.closed_by}>\nRaison : {ticket.close_reason}",
-            )
+            embed = build_ticket_log(guild, ticket, "closed", ticket.closed_by)
+            reason = discord.utils.escape_markdown(ticket.close_reason or "—")
+            if len(reason) > 1024:
+                reason = reason[:940] + "\n… Raison complète dans le transcript joint."
+            embed.add_field(name="Raison", value=reason, inline=False)
             await channel.send(embed=embed, file=transcript_file(ticket, content), allowed_mentions=NO_MENTIONS)
         except (TicketError, discord.HTTPException):
             return "⚠️ Envoi au salon des transcripts impossible. Le transcript reste sauvegardé ; utilise `/ticket transcript`."
         return None
 
-    async def log_action(self, guild, ticket, action, actor_id):
+    async def log_action(self, guild, ticket, action, actor_id, *, detail=None):
         """Send action summaries to the existing general log channel, without transcripts."""
         try:
             db = await get_db_connection()
@@ -622,11 +634,7 @@ class TicketService:
             channel = guild.get_channel(int(row[0])) if row else None
             if not isinstance(channel, discord.TextChannel):
                 return
-            embed = discord.Embed(
-                title=f"Ticket #{ticket.reference} — {EVENT_LABELS[action]}",
-                description=f"Par <@{actor_id}> · Salon : <#{ticket.channel_id}>",
-                color=discord.Color.blurple(),
-            )
+            embed = build_ticket_log(guild, ticket, action, actor_id, detail=detail)
             await channel.send(embed=embed, allowed_mentions=NO_MENTIONS)
         except Exception as exc:
             logger.warning("Could not send ticket action log guild=%s type=%s", guild.id, type(exc).__name__)

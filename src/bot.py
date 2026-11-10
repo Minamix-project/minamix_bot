@@ -17,6 +17,7 @@ from src.utils.db import close_db_pool, create_db_pool, get_db_connection  # noq
 from src.utils.permissions import ADMIN_COMMANDS  # noqa: E402
 from src.utils.audit import record_admin_action  # noqa: E402
 from src.utils.error_reporting import report_error  # noqa: E402
+from src.utils.command_errors import handle_app_command_error  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +59,7 @@ async def _main():
 
     @bot.tree.error
     async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.CommandOnCooldown):
-            message = f"Patiente encore {max(1, int(error.retry_after) + 1)} secondes avant de réutiliser cette commande."
-        elif isinstance(error, app_commands.CheckFailure):
-            message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
-        else:
-            command_name = interaction.command.name if interaction.command else "inconnue"
-            ref = await report_error(
-                bot, guild_ids=interaction.guild_id, source=f"/{command_name}",
-                error=error, user=interaction.user,
-            )
-            message = f"❌ Une erreur est survenue pendant l'exécution de cette commande. Référence : `{ref}`"
-
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+        await handle_app_command_error(bot, interaction, error)
 
     @bot.event
     async def on_error(event_method, *args, **kwargs):

@@ -521,6 +521,14 @@ again. Each panel footer shows the bot's name and avatar, including its default 
 selected per panel in the wizard. Ticket action summaries use the existing general
 log destination configured with `/setlogs`; they do not contain transcript files or
 message bodies. Setting a transcript destination does not change the general logs.
+Ticket journals use the same moderation layout: action icon and color, named fields
+for the channel, ticket, category, creator and actor, a timestamp, the creator's
+avatar and the bot footer. Member changes also identify the affected member.
+Transcript notifications follow the same layout in their private destination.
+Expected access/validation refusals produce one private explanation and no technical
+alert. A locally handled ticket error is not reported again by the global command
+handler; unexpected failures report their underlying type and full command name
+such as `/ticket add`.
 
 The bot needs Manage Channels and Manage Permissions in the ticket category, plus
 View Channel, Send Messages, Read Message History, Embed Links and Attach Files in
