@@ -11,6 +11,8 @@ ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation
 
 
 _GENERAL = (
+    "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
+    "`/ticket close <reason>` · `/ticket transcript` · `/ticket info` — Gérer ton ticket\n"
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
     "`/back` — Mettre fin à ton absence\n"
@@ -57,6 +59,8 @@ _ADMIN_ECONOMY = (
 )
 
 _MODERATION = (
+    "`/ticket add|remove <user>` · `/ticket rename <name>` · `/ticket reopen` — Gérer un ticket\n"
+    "`/ticket link <user>` — Lier un ticket à un utilisateur concerné\n"
     "`/warn <user> <raison>` — Ajouter un avertissement\n"
     "`/warnings <user>` — Consulter les avertissements avec navigation\n"
     "`/delwarn <user> <numéro>` — Supprimer un avertissement\n"
@@ -90,6 +94,8 @@ _MESSAGE_HISTORY_ACCESS = (
 )
 
 _SYSTEM = (
+    "`/ticket panel <channel> <category> <staff_role> [logs_channel]` — Configurer le support\n"
+    "`/ticket reconcile <channel_id> <reason>` — Régulariser un ticket dont le salon a été supprimé\n"
     "`/config` — Afficher les salons configurés\n"
     "`/setlogs <channel>` — Définir les logs généraux\n"
     "`/setdevlog <channel>` — Choisir le salon du devlog du bot\n"

@@ -475,3 +475,73 @@ Discord Developer Portal under **General Information**:
 https://minamix-project.github.io/minamix_bot/privacy.html
 https://minamix-project.github.io/minamix_bot/terms.html
 ```
+
+### Integrated support tickets
+
+Aurum provides a persistent ticket panel with French labels and responses. Code,
+command names and option names are in English. Set it up with:
+
+```text
+/ticket panel channel:#support category:Tickets staff_role:@Support logs_channel:#ticket-logs
+```
+
+`panel` requires Manage Server or Administrator. It creates or updates one active
+panel per server, with General support, RP issue, Shop, Report, Application and
+Staff request categories displayed in French. Moving the panel disables the old
+menu. The menu works after restarts without reposting. `logs_channel` is optional;
+omitting it disables Discord transcript delivery, while database storage remains
+enabled. The log channel must be private. The bot needs Manage Channels and
+Manage Permissions in the ticket category, and View Channel, Send Messages,
+Read Message History, Embed Links and Attach Files in the relevant channels.
+Enable the privileged Message Content and Server Members intents.
+
+Each member can have one open ticket per server. New channels use explicit
+permissions for the creator, the configured support role and the bot; other
+category permissions are not copied. Discord administrators can always access
+channels. Existing tickets retain the support role and log destination configured
+when they were created. Category/role removal requires panel reconfiguration.
+
+| Command | Access and behavior |
+| --- | --- |
+| `/ticket add <user>` | Support role or administration; grant access to another member |
+| `/ticket remove <user>` | Support role or administration; deny that member access |
+| `/ticket rename <name>` | Support role or administration; rename the current ticket |
+| `/ticket close <reason>` | Creator or support; archive as read-only and save a transcript |
+| `/ticket reopen` | Support role or administration; restore previous access permissions |
+| `/ticket transcript` | Creator or support; private UTF-8 text file, saved in MySQL |
+| `/ticket info` | Creator or support; category, creator, dates, staff and closure details |
+| `/ticket link <user>` | Support role or administration; associate a subject without granting access |
+| `/ticket reconcile <channel_id> <reason>` | Administration; close a record only after Discord confirms its channel was deleted |
+
+All management replies are ephemeral and require visibility of the current
+ticket. Invited members can participate but cannot manage or export it. The
+creator and support access cannot be removed through these commands. The
+configured support role can manage tickets even without Manage Server.
+`info` includes the linked subject for support staff; administrators additionally
+see their warning count and guidance for `/warnings` and `/audit`. Ticket
+mutations are recorded in the existing administrative audit log and in a detailed
+ticket event history, which preserves previous close/reopen cycles. Use
+`/audit commande:ticket` to filter these actions and `/config` to inspect the panel. Staff who
+send messages or perform actions are recorded separately.
+
+Closing retains the channel, makes its explicit participants read-only (Discord
+administrators still bypass overwrites), saves the transcript and optionally
+uploads it to the private log channel. If log delivery fails, the saved transcript
+remains available through `transcript`. Reopening restores the saved permissions;
+a second open ticket for the same creator prevents reopening. MySQL transactions,
+a per-server lock and a unique constraint prevent duplicate opens. On ordinary
+Discord or database failures, completed channel changes are undone. Discord and
+MySQL cannot commit atomically: a process termination between their operations
+can require manual reconciliation. A deleted channel can be reconciled without
+inventing a transcript; previously stored exports remain in the database.
+
+Transcripts include available messages in chronological order, author/message
+IDs, timestamps, replies, embed text, attachment links, ticket metadata and action
+history. They do not include deleted messages, past edits, thread histories or
+attachment binaries; Discord attachment URLs may expire. A closed ticket exports
+its closing snapshot; an open ticket creates a fresh snapshot. Exports are capped
+at 20,000 messages and the smaller of 8 MiB or the server upload limit. Exceeding
+a limit or failing to read history aborts closure and restores permissions, with
+no silently truncated transcript. Records and transcripts remain in MySQL until
+removed by an administrator through database maintenance and are covered by the
+normal database backups. No administrative web interface is introduced.

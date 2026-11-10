@@ -36,6 +36,11 @@ async def register(bot):
                     "SELECT COUNT(*), MAX(version), MAX(applied_at) FROM schema_migrations"
                 )
                 migration_count, last_version, last_applied_at = await cursor.fetchone()
+                await cursor.execute(
+                    "SELECT channel_id, category_id, staff_role_id, logs_channel_id FROM ticket_panels WHERE guild_id = %s",
+                    (interaction.guild_id,),
+                )
+                ticket_panel = await cursor.fetchone()
         finally:
             db.close()
 
@@ -70,6 +75,16 @@ async def register(bot):
             ),
             inline=False,
         )
+
+        if ticket_panel:
+            panel_id, category_id, staff_role_id, ticket_logs_id = ticket_panel
+            embed.add_field(
+                name="Support par tickets",
+                value=f"Panneau : <#{panel_id}> · Catégorie : <#{category_id}>\n"
+                      f"Personnel : <@&{staff_role_id}>\n"
+                      + (f"Transcripts : <#{ticket_logs_id}>" if ticket_logs_id else "Transcripts : base de données uniquement"),
+                inline=False,
+            )
 
         if migration_count:
             embed.add_field(
