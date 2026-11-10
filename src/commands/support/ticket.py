@@ -9,33 +9,12 @@ from discord.ext import commands
 from src.config import GUILD_IDS
 from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
-from src.utils.error_reporting import report_error
+from src.utils.ticket_errors import send_error
+from src.utils.ticket_controls import TicketCloseView
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
 from src.utils.ticket_setup import SetupContext, SetupHome
 from src.utils.tickets import CATEGORIES, TicketError, record_staff_message, ticket_session
-
-
-async def send_error(interaction, error):
-    if isinstance(error, app_commands.CommandInvokeError):
-        error = error.original
-    if isinstance(error, TicketError):
-        message = f"❌ {error}"
-    elif isinstance(error, app_commands.CheckFailure):
-        message = "❌ Cette action est réservée à l'administration du serveur."
-    elif isinstance(error, discord.Forbidden):
-        message = "❌ Discord refuse cette action. Vérifie les permissions du bot dans le salon et la catégorie."
-    elif isinstance(error, discord.HTTPException):
-        message = "❌ Discord n'a pas pu terminer cette action. Vérifie le ticket avant de réessayer."
-    else:
-        reference = await report_error(
-            interaction.client, guild_ids=interaction.guild_id, source="ticket", error=error, user=interaction.user
-        )
-        message = f"❌ Une erreur est survenue. Référence : `{reference}`"
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True, allowed_mentions=NO_MENTIONS)
-    else:
-        await interaction.response.send_message(message, ephemeral=True, allowed_mentions=NO_MENTIONS)
 
 
 class TicketPanel(discord.ui.View):
@@ -336,4 +315,5 @@ async def register(bot):
     service = TicketService()
     bot.tree.add_command(Tickets(service))
     bot.add_view(TicketPanel(service))
+    bot.add_view(TicketCloseView(service))
     await bot.add_cog(TicketActivity(bot, service))

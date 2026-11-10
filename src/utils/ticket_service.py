@@ -9,6 +9,7 @@ import re
 
 import discord
 
+from src.utils.ticket_controls import TicketCloseView, ticket_embed
 from src.utils.permissions import is_admin
 from src.utils.db import get_db_connection
 from src.utils.tickets import CATEGORIES, TicketError, ticket_session
@@ -395,19 +396,52 @@ class TicketService:
                 CATEGORIES[category],
                 staff=is_staff(interaction.user, ticket.staff_role_ids),
             )
+            embed = ticket_embed(
+                interaction.client.user,
+                title=f"Ticket #{ticket.reference} — {CATEGORIES[category]}",
+                description="L'équipe de support te répondra prochainement.\n"
+                "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
+            )
+            embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
             await channel.send(
-                f"Bienvenue <@{interaction.user.id}> !\n**{CATEGORIES[category]}** — Explique ta demande ici.\n"
-                "Le personnel te répondra dès que possible. Utilise `/ticket close reason:...` pour fermer le ticket.\n"
-                "Un transcript sera conservé à la fermeture. Les pièces jointes sont référencées par leurs liens.",
-                allowed_mentions=NO_MENTIONS,
+                f"Bienvenue <@{interaction.user.id}> !",
+                embed=embed,
+                view=TicketCloseView(self),
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[interaction.user], replied_user=False
+                ),
             )
         await self.log_action(interaction.guild, ticket, "created", interaction.user.id)
         return ticket
 
-    async def mutate(self, interaction, action, *, user=None, name=None, reason=None):
+    async def creator_ticket(self, interaction):
+        async with ticket_session(interaction.guild_id) as session:
+            ticket = await session.get(interaction.channel_id)
+            require_access(interaction, ticket)
+            self.require_creator(interaction, ticket)
+            if ticket.status != "open":
+                raise TicketError("Ce ticket est déjà fermé.")
+            return ticket
+
+    @staticmethod
+    def require_creator(interaction, ticket):
+        if interaction.user.id != ticket.creator_id:
+            raise TicketError(
+                "Seul le créateur du ticket peut utiliser ce bouton. Le personnel peut utiliser `/ticket close`."
+            )
+
+    async def mutate(
+        self, interaction, action, *, user=None, name=None, reason=None, creator_only=False, expected_ticket_id=None
+    ):
         async with operation(interaction.guild_id) as (session, undo):
             ticket = await session.get(interaction.channel_id)
             staff = require_access(interaction, ticket, staff_only=action != "closed")
+            if creator_only:
+                if action != "closed":
+                    raise ValueError("Creator-only mutation must close a ticket")
+                self.require_creator(interaction, ticket)
+                if ticket.id != expected_ticket_id:
+                    raise TicketError("Ce ticket ne correspond plus à la confirmation. Relance la fermeture.")
             channel = interaction.channel
             if action == "reopened":
                 if ticket.status != "closed":

@@ -527,6 +527,16 @@ View Channel, Send Messages, Read Message History, Embed Links and Attach Files 
 the relevant destinations. Enable the privileged Message Content and Server Members
 intents. `@everyone` and integration-managed roles cannot be support roles.
 
+Opening a ticket mentions only its creator with a French welcome message. A
+French embed explains that support will reply shortly and offers a persistent
+**Fermer le ticket** button, with the bot's name and avatar in its footer. Only
+the ticket creator can use that button, including after a bot restart. It opens
+a private **Es-tu sûr de vouloir fermer ce ticket ?** confirmation with a red
+**Fermer** button and **Annuler**. The confirmation expires after 60 seconds and
+can only be used once. Confirming rechecks the creator and ticket before using
+the normal transcript/archive flow; canceling leaves the ticket unchanged.
+Support staff use `/ticket close <reason>` instead of the button.
+
 Ticket numbers are independent per server and channel names use `ticket-0001`,
 `ticket-0002`, etc. Numbers longer than four digits are kept in full. Existing
 numbers are preserved by the migration; default channel names are padded on

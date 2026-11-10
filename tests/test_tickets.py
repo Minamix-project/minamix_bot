@@ -452,6 +452,14 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         assert opened.status == "open" and opened.creator_id == 2
         assert opened.reference == "0001"
         assert env.channels[40].name == "ticket-0001"
+        welcome = env.channels[40].send.await_args
+        assert welcome.args[0] == "Bienvenue <@2> !"
+        assert "L'équipe de support te répondra prochainement." in welcome.kwargs["embed"].description
+        assert welcome.kwargs["embed"].footer.text == "Aurum"
+        assert welcome.kwargs["embed"].footer.icon_url == "https://example.test/avatar.png"
+        assert welcome.kwargs["allowed_mentions"].to_dict()["users"] == [2]
+        assert welcome.kwargs["allowed_mentions"].to_dict()["parse"] == []
+        assert welcome.kwargs["view"].is_persistent()
         async with store.ticket_session(999) as other:
             assert await other.get(opened.channel_id) is None
             assert await other.active(2) is None
@@ -471,7 +479,9 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         await manager.mutate(env.interaction, "linked", user=env.outsider)
         original = service.serialize_overwrites(env.interaction.channel.overwrites)
         env.interaction.user = env.creator
-        closed, exported = await manager.mutate(env.interaction, "closed", reason="Problème résolu 🥇")
+        closed, exported = await manager.mutate(
+            env.interaction, "closed", reason="Problème résolu 🥇", creator_only=True, expected_ticket_id=opened.id
+        )
         assert closed.status == "closed" and closed.closed_by == 2 and closed.closed_at
         assert "Problème résolu 🥇" in exported.decode()
         assert closed.subject_id == env.outsider.id
