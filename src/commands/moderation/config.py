@@ -30,17 +30,15 @@ async def register(bot):
                     "SELECT config_key, value FROM guild_config WHERE guild_id = %s ORDER BY config_key",
                     (interaction.guild_id,),
                 )
-                rows = (await cursor.fetchall())
+                rows = await cursor.fetchall()
 
-                await cursor.execute(
-                    "SELECT COUNT(*), MAX(version), MAX(applied_at) FROM schema_migrations"
-                )
+                await cursor.execute("SELECT COUNT(*), MAX(version), MAX(applied_at) FROM schema_migrations")
                 migration_count, last_version, last_applied_at = await cursor.fetchone()
                 await cursor.execute(
-                    "SELECT channel_id, category_id, staff_role_id, logs_channel_id FROM ticket_panels WHERE guild_id = %s",
+                    "SELECT name, channel_id, transcript_channel_id FROM ticket_panels WHERE guild_id = %s ORDER BY id",
                     (interaction.guild_id,),
                 )
-                ticket_panel = await cursor.fetchone()
+                ticket_panels = await cursor.fetchall()
         finally:
             db.close()
 
@@ -57,7 +55,9 @@ async def register(bot):
                 except (TypeError, ValueError):
                     channel = None
 
-                value = f"{channel.mention} — **#{channel.name}**" if channel else f"⚠️ Salon introuvable (`{channel_id}`)"
+                value = (
+                    f"{channel.mention} — **#{channel.name}**" if channel else f"⚠️ Salon introuvable (`{channel_id}`)"
+                )
                 embed.add_field(name=label, value=value, inline=False)
 
         embed.add_field(
@@ -76,13 +76,18 @@ async def register(bot):
             inline=False,
         )
 
-        if ticket_panel:
-            panel_id, category_id, staff_role_id, ticket_logs_id = ticket_panel
+        if ticket_panels:
+            lines = []
+            for name, panel_channel_id, transcript_channel_id in ticket_panels[:5]:
+                target = f"<#{transcript_channel_id}>" if transcript_channel_id else "base de données uniquement"
+                lines.append(
+                    f"**{discord.utils.escape_markdown(name)}** : <#{panel_channel_id}> · Transcripts : {target}"
+                )
+            if len(ticket_panels) > 5:
+                lines.append(f"… et {len(ticket_panels) - 5} autre(s).")
             embed.add_field(
-                name="Support par tickets",
-                value=f"Panneau : <#{panel_id}> · Catégorie : <#{category_id}>\n"
-                      f"Personnel : <@&{staff_role_id}>\n"
-                      + (f"Transcripts : <#{ticket_logs_id}>" if ticket_logs_id else "Transcripts : base de données uniquement"),
+                name=f"Support par tickets — {len(ticket_panels)} panneau(x)",
+                value="\n".join(lines)[:1000] + "\nGestion : `/ticket panel`",
                 inline=False,
             )
 

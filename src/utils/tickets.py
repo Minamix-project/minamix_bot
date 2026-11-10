@@ -28,14 +28,41 @@ class TicketError(Exception):
 
 
 @dataclass
+class PanelDraft:
+    id: int | None = None
+    name: str = "Support"
+    title: str | None = None
+    text: str | None = None
+    staff_role_ids: tuple[int, ...] = ()
+    category_id: int | None = None
+    transcript_channel_id: int | None = None
+    channel_id: int | None = None
+    version: int = 0
+
+    @classmethod
+    def from_panel(cls, panel):
+        return cls(
+            id=panel["id"],
+            name=panel["name"],
+            title=panel["title"],
+            text=panel["description"],
+            staff_role_ids=tuple(panel["staff_role_ids"]),
+            category_id=panel["category_id"],
+            transcript_channel_id=panel["transcript_channel_id"],
+            channel_id=panel["channel_id"],
+            version=panel["version"],
+        )
+
+
+@dataclass
 class Ticket:
     id: int
     guild_id: int
     channel_id: int
     creator_id: int
     category: str
-    staff_role_id: int
-    logs_channel_id: int | None
+    staff_role_ids: tuple[int, ...]
+    transcript_channel_id: int | None
     subject_id: int | None
     status: str
     created_at: datetime
@@ -45,6 +72,11 @@ class Ticket:
     saved_overwrites: str | None
     active_creator: int | None = None
     ticket_number: int | None = None
+    panel_id: int | None = None
+
+    @classmethod
+    def from_row(cls, row):
+        return cls(**{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))})
 
     @property
     def reference(self):
@@ -66,49 +98,78 @@ class TicketSession:
             await cursor.execute(sql, args)
             return await cursor.fetchall()
 
-    async def panel(self):
-        rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s", (self.guild_id,))
-        return rows[0] if rows else None
+    @staticmethod
+    def panel_row(row):
+        return {**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))}
+
+    async def panels(self):
+        rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s ORDER BY id", (self.guild_id,))
+        return [self.panel_row(row) for row in rows]
+
+    async def panel(self, panel_id):
+        rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s AND id = %s", (self.guild_id, panel_id))
+        return self.panel_row(rows[0]) if rows else None
+
+    async def panel_for_message(self, channel_id, message_id):
+        rows = await self.rows(
+            "SELECT * FROM ticket_panels WHERE guild_id = %s AND channel_id = %s AND message_id = %s",
+            (self.guild_id, channel_id, message_id),
+        )
+        return self.panel_row(rows[0]) if rows else None
 
     async def save_panel(
-        self, channel_id, message_id, category_id, staff_role_id, logs_channel_id, *, title=None, text=None
+        self,
+        channel_id,
+        message_id,
+        category_id,
+        staff_role_ids,
+        transcript_channel_id,
+        *,
+        panel_id=None,
+        name="Support",
+        title=None,
+        text=None,
     ):
-        await self.execute(
-            "INSERT INTO ticket_panels (guild_id, channel_id, message_id, category_id, staff_role_id, logs_channel_id, title, description) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE channel_id = %s, "
-            "message_id = %s, category_id = %s, staff_role_id = %s, logs_channel_id = %s, title = %s, description = %s",
-            (
-                self.guild_id,
-                channel_id,
-                message_id,
-                category_id,
-                staff_role_id,
-                logs_channel_id,
-                title,
-                text,
-                channel_id,
-                message_id,
-                category_id,
-                staff_role_id,
-                logs_channel_id,
-                title,
-                text,
-            ),
+        values = (
+            channel_id,
+            message_id,
+            category_id,
+            json.dumps(list(staff_role_ids)),
+            transcript_channel_id,
+            name,
+            title,
+            text,
         )
+        if panel_id is None:
+            return await self.execute(
+                "INSERT INTO ticket_panels (channel_id, message_id, category_id, staff_role_ids, transcript_channel_id, "
+                "name, title, description, guild_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (*values, self.guild_id),
+            )
+        await self.execute(
+            "UPDATE ticket_panels SET channel_id = %s, message_id = %s, category_id = %s, staff_role_ids = %s, "
+            "transcript_channel_id = %s, name = %s, title = %s, description = %s, version = version + 1 "
+            "WHERE guild_id = %s AND id = %s",
+            (*values, self.guild_id, panel_id),
+        )
+        return panel_id
+
+    async def delete_panel(self, panel_id):
+        await self.execute("DELETE FROM ticket_panels WHERE guild_id = %s AND id = %s", (self.guild_id, panel_id))
 
     async def get(self, channel_id):
         rows = await self.rows(
             "SELECT * FROM tickets WHERE guild_id = %s AND channel_id = %s",
             (self.guild_id, channel_id),
         )
-        return Ticket(**rows[0]) if rows else None
+        return Ticket.from_row(rows[0]) if rows else None
 
     async def active(self, creator_id):
         rows = await self.rows(
             "SELECT * FROM tickets WHERE guild_id = %s AND active_creator = %s",
             (self.guild_id, creator_id),
         )
-        return Ticket(**rows[0]) if rows else None
+        return Ticket.from_row(rows[0]) if rows else None
 
     async def next_number(self):
         await self.execute(
@@ -126,7 +187,7 @@ class TicketSession:
 
     async def all(self):
         rows = await self.rows("SELECT * FROM tickets WHERE guild_id = %s ORDER BY id", (self.guild_id,))
-        return [Ticket(**row) for row in rows]
+        return [Ticket.from_row(row) for row in rows]
 
     async def purge(self):
         # Use the history subsystem's state lock to keep its counters consistent.
@@ -154,9 +215,18 @@ class TicketSession:
         if number is None:
             number = await self.next_number()
         return await self.execute(
-            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_id, logs_channel_id, ticket_number, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
-            (self.guild_id, channel_id, creator_id, category, panel["staff_role_id"], panel["logs_channel_id"], number),
+            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, ticket_number, panel_id, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            (
+                self.guild_id,
+                channel_id,
+                creator_id,
+                category,
+                json.dumps(list(panel["staff_role_ids"])),
+                panel["transcript_channel_id"],
+                number,
+                panel.get("id"),
+            ),
         )
 
     async def event(self, ticket, actor_id, action, detail=None, *, staff=False):
@@ -268,11 +338,11 @@ async def record_staff_message(guild_id, channel_id, member):
     try:
         async with db.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, staff_role_id FROM tickets WHERE guild_id = %s AND channel_id = %s AND status = 'open'",
+                "SELECT id, staff_role_ids FROM tickets WHERE guild_id = %s AND channel_id = %s AND status = 'open'",
                 (guild_id, channel_id),
             )
             row = await cursor.fetchone()
-            if row and (is_admin(member) or row[1] in role_ids):
+            if row and (is_admin(member) or role_ids.intersection(json.loads(row[1]))):
                 await cursor.execute(
                     "INSERT INTO ticket_staff (ticket_id, user_id, first_seen_at) VALUES (%s, %s, UTC_TIMESTAMP()) "
                     "ON DUPLICATE KEY UPDATE user_id = ticket_staff.user_id",

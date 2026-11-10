@@ -12,6 +12,7 @@ from src.utils.views import ExpiringView
 from src.utils.error_reporting import report_error
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
+from src.utils.ticket_setup import SetupContext, SetupHome
 from src.utils.tickets import CATEGORIES, TicketError, record_staff_message, ticket_session
 
 
@@ -82,33 +83,19 @@ class Tickets(app_commands.Group):
     async def on_error(self, interaction, error):
         await send_error(interaction, error)
 
-    @app_commands.command(name="panel", description="Créer ou modifier le panneau de support (administration).")
-    @app_commands.check(lambda interaction: is_admin(interaction.user))
-    @app_commands.describe(
-        channel="Salon du panneau",
-        category="Catégorie Discord des salons privés",
-        staff_role="Rôle du personnel de support",
-        logs_channel="Salon privé pour les transcripts",
-        title="Titre du panneau ; titre par défaut si omis",
-        text="Texte du panneau ; texte par défaut si omis (\\n pour un saut de ligne)",
+    @app_commands.command(
+        name="panel", description="Ouvrir l'assistant de création et de gestion des panneaux de tickets."
     )
-    async def panel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        category: discord.CategoryChannel,
-        staff_role: discord.Role,
-        logs_channel: discord.TextChannel | None = None,
-        title: app_commands.Range[str, 1, 256] | None = None,
-        text: app_commands.Range[str, 1, 4000] | None = None,
-    ):
-        await interaction.response.defer(ephemeral=True)
-        await self.service.panel(
-            interaction, channel, category, staff_role, logs_channel, TicketPanel(self.service), title=title, text=text
+    @app_commands.check(lambda interaction: is_admin(interaction.user))
+    async def panel(self, interaction: discord.Interaction):
+        context = SetupContext(
+            self.service, lambda: TicketPanel(self.service), send_error, interaction.user.id, interaction.guild_id
         )
-        await interaction.followup.send(
-            f"✅ Panneau de support configuré dans {channel.mention}.", ephemeral=True, allowed_mentions=NO_MENTIONS
+        view = SetupHome(context)
+        await interaction.response.send_message(
+            embed=view.embed(interaction), view=view, ephemeral=True, allowed_mentions=NO_MENTIONS
         )
+        view.message = await interaction.original_response()
 
     @app_commands.command(name="add", description="Ajouter un membre au ticket (personnel autorisé).")
     @app_commands.describe(user="Membre à ajouter au ticket")
@@ -233,7 +220,7 @@ class Tickets(app_commands.Group):
             description=f"**{len(expected_ids)} ticket(s)** sur ce serveur.\n\n"
             "Cette action supprimera définitivement les salons de tickets, leurs données, les interventions, "
             "l'historique des actions, les transcripts et l'historique des messages conservé en base pour ces salons.\n"
-            "Le prochain ticket sera **ticket-0001**. Le panneau reste en place.\n\n"
+            "Le prochain ticket sera **ticket-0001**. Les panneaux restent en place.\n\n"
             "Les copies déjà envoyées dans les logs Discord, téléchargées et présentes dans les sauvegardes "
             "ne sont pas supprimées. Une trace de la purge restera dans le journal d'audit.\n\n"
             "**Cette suppression est irréversible.**",
@@ -258,7 +245,7 @@ class Tickets(app_commands.Group):
         }
         message = f"✅ {labels[action]}"
         if content is not None:
-            warning = await self.service.log_close(interaction.guild, ticket, content)
+            warning = await self.service.send_transcript(interaction.guild, ticket, content)
             if warning:
                 message += "\n" + warning
         await interaction.followup.send(message, ephemeral=True, allowed_mentions=NO_MENTIONS)

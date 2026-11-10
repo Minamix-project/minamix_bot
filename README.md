@@ -478,29 +478,54 @@ https://minamix-project.github.io/minamix_bot/terms.html
 
 ### Integrated support tickets
 
-Aurum provides a persistent ticket panel with French labels and responses. Code,
-command names and option names are in English. Set it up with:
+Aurum provides persistent ticket panels with French labels and responses. Code
+and command names are in English. Open the private setup interface with no parameters:
 
 ```text
-/ticket panel channel:#support category:Tickets staff_role:@Support logs_channel:#ticket-logs
+/ticket panel
 ```
 
-`panel` requires Manage Server or Administrator. It creates or updates one active
-panel per server, with General support, RP issue, Shop, Report, Application and
-Staff request categories displayed in French. Moving the panel disables the old
-menu. The menu works after restarts without reposting. `logs_channel` is optional;
-omitting it disables Discord transcript delivery, while database storage remains
-enabled. The log channel must be private. The bot needs Manage Channels and
-Manage Permissions in the ticket category, and View Channel, Send Messages,
-Read Message History, Embed Links and Attach Files in the relevant channels.
-Enable the privileged Message Content and Server Members intents.
+Manage Server or Administrator is required. Choose **Créer un panneau** or
+**Gérer les panneaux**. The creation/editor wizard has five steps:
 
-Optional `title` (up to 256 characters) and `text` (up to 4,000 characters)
-customize the panel. Omit them to use the default title and message. Use literal
-`\n` in `text` for line breaks. The footer always shows the bot's name and
-avatar, including its default avatar if no custom one is set. The category menu
-clears after every selection, including rejected requests, so members can select
-the same category again.
+1. **Nom et message**: a modal sets the manager name (1–80 characters), public
+   title (up to 256 characters), and multiline text (up to 4,000 characters).
+   Blank title/text fields use the default panel message.
+2. **Rôles de support**: select 1–10 dedicated roles through Discord's role picker.
+3. **Catégorie des tickets**: select the category for private ticket channels.
+4. **Salon des transcripts**: optionally select a private text channel for the
+   transcript files, or choose **Sans salon de transcripts**. Database storage
+   remains enabled regardless of this choice.
+5. **Envoi du panneau**: select the destination text channel, then press
+   **Enregistrer et envoyer**.
+
+Each step has **Retour** and **Enregistrer et continuer**. Navigation retains the
+current draft; changes are saved and published only on the final step. Canceling,
+leaving the wizard, or its ten-minute timeout discards the draft. Each editor is
+restricted to its requesting administrator and rechecks permissions on interactions
+and modal submissions. A concurrently edited panel must be reopened before saving.
+
+The manager lists panels by ID and name, paginated in groups of 25. Each panel can
+be edited, sent/moved, or removed independently. Removal requires confirmation,
+disables that panel's public menu and retains its existing tickets. Moving a panel
+disables only its old message. Multiple panels can also share the same text channel.
+The migration preserves existing published panels, roles, transcript destinations,
+message IDs and ticket numbers.
+
+Public panels offer General support, RP issue, Shop, Report, Application and Staff
+request categories in French. Their menus work after restarts and clear after every
+selection, including rejected requests, so members can select the same category
+again. Each panel footer shows the bot's name and avatar, including its default avatar.
+
+**Transcripts and general logs are separate.** The private transcript channel is
+selected per panel in the wizard. Ticket action summaries use the existing general
+log destination configured with `/setlogs`; they do not contain transcript files or
+message bodies. Setting a transcript destination does not change the general logs.
+
+The bot needs Manage Channels and Manage Permissions in the ticket category, plus
+View Channel, Send Messages, Read Message History, Embed Links and Attach Files in
+the relevant destinations. Enable the privileged Message Content and Server Members
+intents. `@everyone` and integration-managed roles cannot be support roles.
 
 Ticket numbers are independent per server and channel names use `ticket-0001`,
 `ticket-0002`, etc. Numbers longer than four digits are kept in full. Existing
@@ -508,9 +533,9 @@ numbers are preserved by the migration; default channel names are padded on
 startup, while custom names remain unchanged.
 
 Each member can have one open ticket per server. New channels use explicit
-permissions for the creator, the configured support role and the bot; other
+permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
-channels. Existing tickets retain the support role and log destination configured
+channels. Existing tickets retain the support roles and transcript destination configured
 when they were created. Category/role removal requires panel reconfiguration.
 
 | Command | Access and behavior |
@@ -529,17 +554,17 @@ when they were created. Category/role removal requires panel reconfiguration.
 All management replies are ephemeral and require visibility of the current
 ticket. Invited members can participate but cannot manage or export it. The
 creator and support access cannot be removed through these commands. The
-configured support role can manage tickets even without Manage Server.
+configured support roles can manage tickets even without Manage Server.
 `info` includes the linked subject for support staff; administrators additionally
 see their warning count and guidance for `/warnings` and `/audit`. Ticket
 mutations are recorded in the existing administrative audit log and in a detailed
 ticket event history, which preserves previous close/reopen cycles. Use
-`/audit commande:ticket` to filter these actions and `/config` to inspect the panel. Staff who
+`/audit commande:ticket` to filter these actions and `/config` to inspect the panels. Staff who
 send messages or perform actions are recorded separately.
 
 Closing retains the channel, makes its explicit participants read-only (Discord
 administrators still bypass overwrites), saves the transcript and optionally
-uploads it to the private log channel. If log delivery fails, the saved transcript
+uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
 remains available through `transcript`. Reopening restores the saved permissions;
 a second open ticket for the same creator prevents reopening. MySQL transactions,
 a per-server lock and a unique constraint prevent duplicate opens. On ordinary
@@ -566,7 +591,7 @@ are checked again on confirmation, and the confirmation can only be used once.
 The preview itself does not delete anything. If the ticket list changes, a new
 confirmation is required. Purge deletes open and closed ticket channels, ticket
 metadata, staff participation, action history, database transcripts and retained
-message history for those channels. The panel remains configured, and the next
+message history for those channels. The panels remain configured, and the next
 ticket is `ticket-0001`. Other servers and unrelated message history are kept.
 If any channel deletion fails, records and numbering are retained for a retry;
 some channels may already have been deleted. A minimal purge audit record is kept.

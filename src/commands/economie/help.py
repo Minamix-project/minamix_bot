@@ -94,7 +94,7 @@ _MESSAGE_HISTORY_ACCESS = (
 )
 
 _SYSTEM = (
-    "`/ticket panel <channel> <category> <staff_role> [logs_channel] [title] [text]` — Configurer le support\n"
+    "`/ticket panel` — Assistant de création et de gestion de plusieurs panneaux\n"
     "`/ticket purge` — Supprimer tous les tickets et leurs données ; confirmation requise\n"
     "`/ticket reconcile <channel_id> <reason>` — Régulariser un ticket dont le salon a été supprimé\n"
     "`/config` — Afficher les salons configurés\n"
