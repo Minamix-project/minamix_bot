@@ -182,6 +182,20 @@ class Tickets(app_commands.Group):
     async def reopen(self, interaction: discord.Interaction):
         await self.change(interaction, "reopened")
 
+    @app_commands.command(name="claim", description="Prendre en charge ce ticket (rôle de support de la catégorie).")
+    async def claim(self, interaction: discord.Interaction):
+        await self.assignment(interaction, release=False)
+
+    @app_commands.command(name="release", description="Libérer ce ticket (responsable actuel uniquement).")
+    async def release(self, interaction: discord.Interaction):
+        await self.assignment(interaction, release=True)
+
+    async def assignment(self, interaction, *, release):
+        await interaction.response.defer(ephemeral=True)
+        await self.service.assign(interaction, release=release)
+        text = "Tu as libéré le ticket." if release else "Tu prends maintenant ce ticket en charge."
+        await interaction.followup.send(f"✅ {text}", ephemeral=True, allowed_mentions=NO_MENTIONS)
+
     @app_commands.command(name="transcript", description="Télécharger l'historique du ticket (créateur ou personnel).")
     async def transcript(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -209,6 +223,7 @@ class Tickets(app_commands.Group):
             embed.add_field(name="Créateur", value=f"<@{ticket.creator_id}> (`{ticket.creator_id}`)")
             embed.add_field(name="Catégorie", value=ticket.label)
             embed.add_field(name="État", value="Ouvert" if ticket.status == "open" else "Fermé")
+            embed.add_field(name="Responsable", value=f"<@{ticket.claimed_by}>" if ticket.claimed_by else "Aucun")
             embed.add_field(
                 name="Création", value=discord.utils.format_dt(ticket.created_at.replace(tzinfo=timezone.utc))
             )

@@ -638,6 +638,28 @@ concurrent overwrites. `/ticket create` autocompletion uses the current names.
 Category keys remain stable when renamed, so the per-category ticket limit is
 preserved.
 
+**Prise en charge** is enabled by default for every existing and new category.
+The category editor can toggle it before saving. Members holding one of that
+category's support roles can use **Prendre en charge** or `/ticket claim` in an
+open ticket. Administrator permissions alone do not grant claim eligibility.
+Only one person can claim a ticket; concurrent requests are serialized and
+guarded in MySQL. Claiming does not modify channel access or other staff powers.
+
+The opening embed shows the responsible member and claim time. The channel name
+keeps its number first, for example `ticket-0001-🟢-alice`. Only the responsible
+member can use **Libérer le ticket** or `/ticket release`, including after a
+restart; there is no administrator override or reassignment action. Release
+restores the original channel name. Renaming a claimed ticket retains its
+marker and updates the name that will be restored on release. Claim history is
+included in action logs, the administrative audit and transcripts.
+
+Disabling claiming prevents new claims and hides the claim button. An existing
+responsible member keeps their assignment and can still release it while they
+have access, including in a closed ticket. Closing and reopening keep assignment
+history and ownership. Previously created tickets receive the controls during
+startup category synchronization. If an opening message was deleted, an explicit
+claim or release recreates its information and controls without pinging members.
+
 Use **Créer une catégorie** to draft a new category with its own generated key,
 texts, emoji and optional roles, then press **Créer** to publish it. Up to 25
 categories can be active per guild. The limit is checked again when saving.
@@ -688,6 +710,8 @@ category.
 | `/ticket rename <name>` | Support role or administration; rename the current ticket |
 | `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
 | `/ticket reopen` | Support role or administration; restore previous access permissions |
+| `/ticket claim` | Category support role; exclusively claim an open ticket without changing access |
+| `/ticket release` | Current responsible member only; release the ticket and restore its name |
 | `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
 | `/ticket info` | Creator while open, or support; category, creator, dates, staff and closure details |
 | `/ticket link <user>` | Support role or administration; associate a subject without granting access |

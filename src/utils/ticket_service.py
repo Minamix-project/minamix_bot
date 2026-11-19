@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import discord
 
-from src.utils.ticket_controls import TicketCloseView, ticket_embed
+from src.utils.ticket_controls import TicketCloseView, previous_ticket_controls, ticket_embed
 from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
 from src.utils.tickets import MAX_CATEGORIES, TicketError, ticket_session
@@ -37,6 +37,8 @@ EVENT_LABELS = {
     "linked": "Utilisateur concerné",
     "transcript": "Export de l'historique",
     "panel": "Configuration du panneau",
+    "claimed": "Prise en charge",
+    "released": "Libération",
 }
 
 
@@ -44,7 +46,7 @@ def is_staff(member, staff_role_ids):
     return is_admin(member) or bool(set(staff_role_ids).intersection(role.id for role in getattr(member, "roles", ())))
 
 
-def require_access(interaction, ticket, *, staff_only=False):
+def require_ticket_channel(interaction, ticket):
     if ticket is None:
         raise TicketError("Ce salon n'est pas un ticket enregistré sur ce serveur.")
     channel = interaction.channel
@@ -56,6 +58,11 @@ def require_access(interaction, ticket, *, staff_only=False):
         raise TicketError("Cette action doit être effectuée dans le salon du ticket.")
     if not channel.permissions_for(interaction.user).view_channel:
         raise TicketError("Tu n'as pas accès à ce ticket.")
+    return channel
+
+
+def require_access(interaction, ticket, *, staff_only=False):
+    require_ticket_channel(interaction, ticket)
     staff = is_staff(interaction.user, ticket.staff_role_ids)
     if not staff and (staff_only or interaction.user.id != ticket.creator_id):
         raise TicketError(
@@ -240,7 +247,30 @@ def opening_embed(bot_user, ticket, category):
         "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
     )
     embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
+    if ticket.claimed_by is not None:
+        value = f"<@{ticket.claimed_by}>"
+        if ticket.claimed_at:
+            value += " · " + discord.utils.format_dt(ticket.claimed_at.replace(tzinfo=timezone.utc))
+        embed.add_field(name="Responsable", value=value, inline=False)
+    else:
+        embed.add_field(
+            name="Prise en charge", value="En attente d'un membre du staff." if ticket.claim_enabled else "Désactivée.",
+            inline=False,
+        )
     return embed
+
+
+def claimed_channel_name(base_name, guild, user_id, *, member=None):
+    member = member or guild.get_member(user_id)
+    label = member.display_name if member else str(user_id)
+    label = re.sub(r"[^\w-]+", "-", label.casefold()).strip("-_") or str(user_id)
+    base = base_name[:80]
+    while len(base.encode("utf-16-le")) // 2 > 80:
+        base = base[:-1]
+    name = f"{base}-🟢-{label}"
+    while len(name.encode("utf-16-le")) // 2 > 100:
+        name = name[:-1]
+    return name
 
 
 def transcript_file(ticket, content):
@@ -265,6 +295,8 @@ async def build_transcript(channel, ticket, session):
         f"Catégorie : {ticket.label}",
         f"Création : {utc_label(ticket.created_at)}",
         f"État : {'Fermé' if ticket.status == 'closed' else 'Ouvert'}",
+        f"Responsable : {ticket.claimed_by or '—'}",
+        f"Prise en charge : {utc_label(ticket.claimed_at)}",
         f"Utilisateur concerné : {ticket.subject_id or '—'}",
         f"Fermeture : {utc_label(ticket.closed_at)}",
         f"Fermé par : {ticket.closed_by or '—'}",
@@ -385,9 +417,65 @@ class TicketService:
             undo.append(lambda channel=channel, old=old, topic=old_topic: channel.edit(overwrites=old, topic=topic))
             if message:
                 old_embeds = list(message.embeds)
-                await message.edit(embed=opening_embed(guild.me, ticket, category), allowed_mentions=NO_MENTIONS)
-                undo.append(lambda message=message, embeds=old_embeds: message.edit(embeds=embeds, allowed_mentions=NO_MENTIONS))
+                old_view = previous_ticket_controls(self, message)
+                await message.edit(embed=opening_embed(guild.me, ticket, category),
+                                   view=TicketCloseView(self, ticket), allowed_mentions=NO_MENTIONS)
+                undo.append(lambda message=message, embeds=old_embeds, view=old_view:
+                            message.edit(embeds=embeds, view=view, allowed_mentions=NO_MENTIONS))
             await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id)
+
+    async def refresh_opening(self, guild, channel, ticket, session, undo, *, create=False):
+        message = await self.welcome_message(guild, channel, ticket)
+        if message is None and not create:
+            return
+        category = await session.category(ticket.category, include_inactive=True)
+        if category is None:
+            category = {"name": ticket.label, "emoji": "🎫", "welcome": "Explique ta demande au staff."}
+        embed = opening_embed(guild.me, ticket, category)
+        view = TicketCloseView(self, ticket)
+        if message:
+            old_embeds, old_view = list(message.embeds), previous_ticket_controls(self, message)
+            await message.edit(embed=embed, view=view, allowed_mentions=NO_MENTIONS)
+            undo.append(lambda: message.edit(embeds=old_embeds, view=old_view, allowed_mentions=NO_MENTIONS))
+        else:
+            message = await channel.send(embed=embed, view=view, allowed_mentions=NO_MENTIONS)
+            undo.append(message.delete)
+        if message.id != ticket.welcome_message_id:
+            await session.set_welcome_message(ticket, message.id)
+
+    async def assign(self, interaction, *, release=False):
+        async with operation(interaction.guild_id) as (session, undo):
+            ticket = await session.get(interaction.channel_id)
+            channel = require_ticket_channel(interaction, ticket)
+            if release:
+                if ticket.claimed_by is None:
+                    raise TicketError("Ce ticket n'est pas pris en charge.")
+                if ticket.claimed_by != interaction.user.id:
+                    raise TicketError("Seul le responsable actuel peut libérer ce ticket.")
+                name = ticket.claim_base_name or f"ticket-{ticket.reference}"
+                await session.release(ticket, interaction.user.id)
+            else:
+                if ticket.status != "open":
+                    raise TicketError("Ce ticket est fermé. Rouvre-le avant de le prendre en charge.")
+                if not ticket.claim_enabled:
+                    raise TicketError("La prise en charge est désactivée pour cette catégorie.")
+                category = await session.category(ticket.category, include_inactive=True)
+                roles = category["staff_role_ids"] if category else ticket.staff_role_ids
+                if not set(roles).intersection(role.id for role in interaction.user.roles):
+                    raise TicketError("Tu dois avoir l'un des rôles de support de cette catégorie pour prendre en charge ce ticket.")
+                if ticket.claimed_by is not None:
+                    raise TicketError(f"Ce ticket est déjà pris en charge par <@{ticket.claimed_by}>. Seule cette personne peut le libérer.")
+                name = claimed_channel_name(channel.name, interaction.guild, interaction.user.id, member=interaction.user)
+                await session.claim(ticket, interaction.user.id, channel.name)
+            old_name = channel.name
+            await channel.edit(name=name, reason="Libération du ticket" if release else "Prise en charge du ticket")
+            undo.append(lambda: channel.edit(name=old_name))
+            ticket = await session.get(channel.id)
+            action = "released" if release else "claimed"
+            await session.event(ticket, interaction.user.id, action, staff=True)
+            await self.refresh_opening(interaction.guild, channel, ticket, session, undo, create=True)
+        await self.log_action(interaction.guild, ticket, action, interaction.user.id)
+        return ticket
 
     async def save_category(self, interaction, draft, view_factory):
         if not is_admin(interaction.user):
@@ -648,7 +736,7 @@ class TicketService:
             message = await channel.send(
                 f"Bienvenue <@{creator.id}> !",
                 embed=embed,
-                view=TicketCloseView(self),
+                view=TicketCloseView(self, ticket),
                 allowed_mentions=discord.AllowedMentions(
                     everyone=False, roles=False, users=[creator], replied_user=False
                 ),
@@ -752,6 +840,9 @@ class TicketService:
                             "Le nom doit contenir entre 1 et 90 caractères (lettres, chiffres ou tirets)."
                         )
                     old_name = channel.name
+                    if ticket.claimed_by is not None:
+                        await session.set_claim_base_name(ticket, name)
+                        name = claimed_channel_name(name, interaction.guild, ticket.claimed_by)
                     await channel.edit(name=name, reason="Renommage du ticket")
                     undo.append(lambda: channel.edit(name=old_name))
                     detail = name
@@ -764,6 +855,8 @@ class TicketService:
                     raise ValueError(f"Unknown ticket action: {action}")
             ticket = await session.get(channel.id)
             await session.event(ticket, interaction.user.id, action, detail, staff=staff)
+            if action in {"closed", "reopened"}:
+                await self.refresh_opening(interaction.guild, channel, ticket, session, undo)
             if action == "closed":
                 content = await build_transcript(channel, ticket, session)
                 await session.save_transcript(ticket, interaction.user.id, content)

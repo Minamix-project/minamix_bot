@@ -247,12 +247,12 @@ def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_lin
 def category_record(key="report", **changes):
     option = store.CATEGORY_OPTIONS[key]
     return {"category_key": key, "name": option.label, "emoji": option.emoji,
-            "description": option.description, "welcome": option.welcome, "staff_role_ids": (), "version": 1, **changes}
+            "description": option.description, "welcome": option.welcome, "staff_role_ids": (), "version": 1, "claim_enabled": True, **changes}
 
 
 def install_session(monkeypatch, session, *, fail_commit=False):
     if not hasattr(session, "category"):
-        session.category = AsyncMock(side_effect=lambda key: category_record(key, staff_role_ids=(5,)))
+        session.category = AsyncMock(side_effect=lambda key, **kwargs: category_record(key, staff_role_ids=(5,)))
     if not hasattr(session, "categories"):
         session.categories = AsyncMock(return_value=[category_record(key) for key in store.CATEGORY_OPTIONS])
     if not hasattr(session, "set_welcome_message"):
@@ -352,6 +352,8 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "panel",
                 "create",
                 "categories",
+                "claim",
+                "release",
                 "add",
                 "remove",
                 "rename",

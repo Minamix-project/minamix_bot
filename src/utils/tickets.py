@@ -70,6 +70,7 @@ class CategoryDraft:
     welcome: str
     staff_role_ids: tuple[int, ...] = ()
     version: int = 1
+    claim_enabled: bool = True
 
     @classmethod
     def from_category(cls, category):
@@ -126,6 +127,10 @@ class Ticket:
     category_version: int = 0
     welcome_message_id: int | None = None
     category_name: str | None = None
+    claim_enabled: bool = True
+    claimed_by: int | None = None
+    claimed_at: datetime | None = None
+    claim_base_name: str | None = None
 
     @classmethod
     def from_row(cls, row):
@@ -177,15 +182,21 @@ class TicketSession:
         )
         return [{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))} for row in rows]
 
-    async def category(self, key):
+    async def category(self, key, *, include_inactive=False):
+        if include_inactive:
+            await self.ensure_categories()
+            rows = await self.rows(
+                "SELECT * FROM ticket_categories WHERE guild_id = %s AND category_key = %s", (self.guild_id, key),
+            )
+            return {**rows[0], "staff_role_ids": tuple(json.loads(rows[0]["staff_role_ids"]))} if rows else None
         return next((category for category in await self.categories() if category["category_key"] == key), None)
 
     async def save_category(self, draft):
         await self.execute(
             "UPDATE ticket_categories SET name = %s, emoji = %s, description = %s, welcome = %s, "
-            "staff_role_ids = %s, version = version + 1 WHERE guild_id = %s AND category_key = %s",
+            "staff_role_ids = %s, claim_enabled = %s, version = version + 1 WHERE guild_id = %s AND category_key = %s",
             (draft.name, draft.emoji, draft.description, draft.welcome, json.dumps(list(draft.staff_role_ids)),
-             self.guild_id, draft.category_key),
+             draft.claim_enabled, self.guild_id, draft.category_key),
         )
 
     async def create_category(self, key, draft):
@@ -195,10 +206,10 @@ class TicketSession:
         )
         await self.execute(
             "INSERT INTO ticket_categories "
-            "(guild_id, category_key, name, emoji, description, welcome, staff_role_ids, position) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "(guild_id, category_key, name, emoji, description, welcome, staff_role_ids, position, claim_enabled) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (self.guild_id, key, draft.name, draft.emoji, draft.description, draft.welcome,
-             json.dumps(list(draft.staff_role_ids)), rows[0]["next_position"]),
+             json.dumps(list(draft.staff_role_ids)), rows[0]["next_position"], draft.claim_enabled),
         )
 
     async def delete_category(self, key):
@@ -211,7 +222,8 @@ class TicketSession:
 
     async def ticket_rows(self, condition, args):
         rows = await self.rows(
-            "SELECT t.*, c.name AS category_name FROM tickets t LEFT JOIN ticket_categories c "
+            "SELECT t.*, c.name AS category_name, COALESCE(c.claim_enabled, 1) AS claim_enabled "
+            "FROM tickets t LEFT JOIN ticket_categories c "
             "ON c.guild_id = t.guild_id AND c.category_key = t.category WHERE " + condition, args,
         )
         return [Ticket.from_row(row) for row in rows]
@@ -379,6 +391,32 @@ class TicketSession:
         await self.execute(
             "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
             (self.guild_id, actor_id, f"ticket.{action}: #{ticket.reference} channel={ticket.channel_id}"),
+        )
+
+    async def claim(self, ticket, actor_id, base_name):
+        async with self.db.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE tickets SET claimed_by = %s, claimed_at = UTC_TIMESTAMP(), claim_base_name = %s "
+                "WHERE guild_id = %s AND id = %s AND claimed_by IS NULL AND status = 'open'",
+                (actor_id, base_name, self.guild_id, ticket.id),
+            )
+            if cursor.rowcount != 1:
+                raise TicketError("Ce ticket est déjà pris en charge ou a été fermé. Actualise le ticket.")
+
+    async def release(self, ticket, actor_id):
+        async with self.db.cursor() as cursor:
+            await cursor.execute(
+                "UPDATE tickets SET claimed_by = NULL, claimed_at = NULL, claim_base_name = NULL "
+                "WHERE guild_id = %s AND id = %s AND claimed_by = %s",
+                (self.guild_id, ticket.id, actor_id),
+            )
+            if cursor.rowcount != 1:
+                raise TicketError("Seul le responsable actuel peut libérer ce ticket.")
+
+    async def set_claim_base_name(self, ticket, name):
+        await self.execute(
+            "UPDATE tickets SET claim_base_name = %s WHERE guild_id = %s AND id = %s",
+            (name, self.guild_id, ticket.id),
         )
 
     async def close(self, ticket, actor_id, reason, overwrites):

@@ -13,6 +13,8 @@ ACTION_STYLES = {
     "removed": ("👤 Membre retiré du ticket", discord.Color.orange()),
     "renamed": ("✏️ Ticket renommé", discord.Color.orange()),
     "linked": ("🔗 Utilisateur lié au ticket", discord.Color.blurple()),
+    "claimed": ("🟢 Ticket pris en charge", discord.Color.green()),
+    "released": ("↩️ Ticket libéré", discord.Color.orange()),
 }
 
 
@@ -29,6 +31,8 @@ def build_ticket_log(guild, ticket, action, actor_id, *, detail=None):
     embed.add_field(name="Catégorie", value=ticket.label)
     embed.add_field(name="Créateur", value=user_text(guild, ticket.creator_id), inline=False)
     embed.add_field(name="Par", value=user_text(guild, actor_id), inline=False)
+    if ticket.claimed_by is not None:
+        embed.add_field(name="Responsable", value=user_text(guild, ticket.claimed_by), inline=False)
     if detail and action in {"added", "removed", "linked"}:
         label = "Utilisateur concerné" if action == "linked" else "Membre concerné"
         embed.add_field(name=label, value=user_text(guild, int(detail)), inline=False)

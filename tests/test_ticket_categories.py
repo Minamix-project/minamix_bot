@@ -45,10 +45,14 @@ def test_category_editor_keeps_roles_optional_and_drafts_private_until_save(monk
         env.interaction.data = {"values": []}
         await view.select_roles(env.interaction)
         assert view.draft.staff_role_ids == ()
+        assert view.draft.claim_enabled is True
+        await view.toggle_claim(env.interaction)
+        assert view.draft.claim_enabled is False
         context.service.save_category.assert_not_awaited()
         await view.save(env.interaction)
         draft = context.service.save_category.await_args.args[1]
         assert draft.name == "Médiation" and draft.staff_role_ids == ()
+        assert draft.claim_enabled is False
         assert view.draft is None and "enregistrée" in view.notice
     asyncio.run(scenario())
 

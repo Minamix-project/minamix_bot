@@ -79,6 +79,7 @@ class CategoryEditor(SetupView):
                 value=" ".join(f"<@&{role_id}>" for role_id in draft.staff_role_ids) or "Aucun — administration uniquement",
                 inline=False,
             )
+            embed.add_field(name="Prise en charge", value="Activée" if draft.claim_enabled else "Désactivée")
         return embed
 
     def build(self, guild):
@@ -109,6 +110,9 @@ class CategoryEditor(SetupView):
             self.button("Modifier le nom et les textes", self.edit, row=2, style=discord.ButtonStyle.primary)
             self.button("Créer" if self.draft.version == 0 else "Enregistrer", self.save, row=2, style=discord.ButtonStyle.success)
             self.button("Annuler les modifications", self.discard, row=2)
+            self.button("Prise en charge : Oui" if self.draft.claim_enabled else "Prise en charge : Non",
+                        self.toggle_claim, row=2,
+                        style=discord.ButtonStyle.success if self.draft.claim_enabled else discord.ButtonStyle.secondary)
             if self.draft.version:
                 self.button("Supprimer", self.ask_delete, row=2, style=discord.ButtonStyle.danger)
         self.button("Créer une catégorie", self.create, row=3, style=discord.ButtonStyle.primary,
@@ -145,6 +149,11 @@ class CategoryEditor(SetupView):
 
     async def edit(self, interaction):
         await interaction.response.send_modal(CategoryTextModal(self))
+
+    async def toggle_claim(self, interaction):
+        self.draft.claim_enabled = not self.draft.claim_enabled
+        self.generation += 1
+        await self.render(interaction)
 
     async def discard(self, interaction):
         self.draft = None

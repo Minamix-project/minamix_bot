@@ -128,5 +128,7 @@ def test_close_button_is_registered_as_persistent_after_a_restart():
             close_view = next(view for view in bot.persistent_views if isinstance(view, controls.TicketCloseView))
             assert close_view.is_persistent()
             assert close_view.close.custom_id == "aurum:tickets:close:v1"
+            assert close_view.claim.custom_id == "aurum:tickets:claim:v1"
+            assert close_view.release.custom_id == "aurum:tickets:release:v1"
 
     asyncio.run(scenario())
