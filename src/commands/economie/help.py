@@ -75,7 +75,7 @@ _MODERATION = (
 
 _ADMIN_TICKETS = (
     "`/ticket panel` — Créer, modifier, déplacer ou supprimer des panneaux avec l'assistant\n"
-    "`/ticket categories` — Personnaliser les catégories, leurs textes, emojis et rôles de support\n"
+    "`/ticket categories` — Créer, supprimer et personnaliser les catégories, leurs textes, emojis et rôles\n"
     "`/ticket create <reason> [user] [panel]` — Créer un ticket ; `user` réservé à l'administration\n"
     "`/ticket add <user>` — Ajouter un membre au ticket\n"
     "`/ticket remove <user>` — Retirer un membre du ticket\n"

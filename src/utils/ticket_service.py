@@ -7,13 +7,14 @@ import json
 import logging
 import re
 import unicodedata
+from uuid import uuid4
 
 import discord
 
 from src.utils.ticket_controls import TicketCloseView, ticket_embed
 from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
-from src.utils.tickets import TicketError, ticket_session
+from src.utils.tickets import MAX_CATEGORIES, TicketError, ticket_session
 
 logger = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -405,34 +406,60 @@ class TicketService:
             raise TicketError("Indique un emoji Unicode ou un emoji personnalisé accessible au bot.")
         validate_staff_roles(interaction.guild, [interaction.guild.get_role(role_id) for role_id in draft.staff_role_ids])
         async with operation(interaction.guild_id) as (session, undo):
-            previous = await session.category(draft.category_key)
-            if previous is None or previous["version"] != draft.version:
-                raise TicketError("Cette catégorie a été modifiée. Rouvre le gestionnaire avant de l'éditer.")
             old_categories = await session.categories()
-            await session.save_category(draft)
-            category = await session.category(draft.category_key)
+            creating = draft.version == 0 and not draft.category_key
+            if creating:
+                if len(old_categories) >= MAX_CATEGORIES:
+                    raise TicketError(f"Tu peux créer au maximum {MAX_CATEGORIES} catégories actives par serveur.")
+                key = uuid4().hex
+                await session.create_category(key, draft)
+            else:
+                previous = await session.category(draft.category_key)
+                if previous is None or previous["version"] != draft.version:
+                    raise TicketError("Cette catégorie a été modifiée ou supprimée. Rouvre le gestionnaire avant de l'éditer.")
+                key = draft.category_key
+                await session.save_category(draft)
+            category = await session.category(key)
             await self.sync_category_tickets(interaction.guild, category, session, undo)
-            categories = await session.categories()
-            for panel in await session.panels():
-                channel = interaction.guild.get_channel(panel["channel_id"])
-                if not isinstance(channel, discord.TextChannel):
-                    continue
-                try:
-                    message = await channel.fetch_message(panel["message_id"])
-                except discord.NotFound:
-                    continue
-                if message.author.id != interaction.client.user.id:
-                    continue
-                view, old_view = view_factory(), view_factory()
-                view.set_categories(categories)
-                old_view.set_categories(old_categories)
-                await message.edit(view=view)
-                undo.append(lambda message=message, old_view=old_view: message.edit(view=old_view))
+            await self.update_category_menus(interaction.guild, session, view_factory, old_categories, undo)
             await session.execute(
                 "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
-                (interaction.guild_id, interaction.user.id, f"ticket.category: key={draft.category_key}"),
+                (interaction.guild_id, interaction.user.id, f"ticket.category{'_create' if creating else ''}: key={key}"),
             )
         return category
+
+    async def update_category_menus(self, guild, session, view_factory, previous, undo):
+        categories = await session.categories()
+        for panel in await session.panels():
+            channel = guild.get_channel(panel["channel_id"])
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            try:
+                message = await channel.fetch_message(panel["message_id"])
+            except discord.NotFound:
+                continue
+            if message.author.id != guild.me.id:
+                continue
+            view, old_view = view_factory(), view_factory()
+            view.set_categories(categories)
+            old_view.set_categories(previous)
+            await message.edit(view=view)
+            undo.append(lambda message=message, old_view=old_view: message.edit(view=old_view))
+
+    async def delete_category(self, interaction, key, version, view_factory):
+        if not is_admin(interaction.user):
+            raise TicketError("Cette action est réservée à l'administration du serveur.")
+        async with operation(interaction.guild_id) as (session, undo):
+            category = await session.category(key)
+            if category is None or category["version"] != version:
+                raise TicketError("Cette catégorie a été modifiée ou supprimée. Rouvre le gestionnaire avant de la supprimer.")
+            previous = await session.categories()
+            await session.delete_category(key)
+            await self.update_category_menus(interaction.guild, session, view_factory, previous, undo)
+            await session.execute(
+                "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
+                (interaction.guild_id, interaction.user.id, f"ticket.category_delete: key={key}"),
+            )
 
     async def sync_categories(self, guild):
         async with ticket_session(guild.id) as session:

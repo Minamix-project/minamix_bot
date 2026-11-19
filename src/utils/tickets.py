@@ -48,6 +48,7 @@ CATEGORY_OPTIONS = {
 }
 CATEGORIES = {key: option.label for key, option in CATEGORY_OPTIONS.items()}
 LEGACY_CATEGORIES = {"rp": "Problème RP", "shop": "Boutique", "application": "Candidature", "staff": "Demande au staff"}
+MAX_CATEGORIES = 25
 PART_SIZE = 256 * 1024
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,8 @@ class TicketSession:
     async def categories(self):
         await self.ensure_categories()
         rows = await self.rows(
-            "SELECT * FROM ticket_categories WHERE guild_id = %s ORDER BY position, category_key", (self.guild_id,),
+            "SELECT * FROM ticket_categories WHERE guild_id = %s AND is_active = 1 ORDER BY position, category_key",
+            (self.guild_id,),
         )
         return [{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))} for row in rows]
 
@@ -184,6 +186,27 @@ class TicketSession:
             "staff_role_ids = %s, version = version + 1 WHERE guild_id = %s AND category_key = %s",
             (draft.name, draft.emoji, draft.description, draft.welcome, json.dumps(list(draft.staff_role_ids)),
              self.guild_id, draft.category_key),
+        )
+
+    async def create_category(self, key, draft):
+        rows = await self.rows(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM ticket_categories WHERE guild_id = %s",
+            (self.guild_id,),
+        )
+        await self.execute(
+            "INSERT INTO ticket_categories "
+            "(guild_id, category_key, name, emoji, description, welcome, staff_role_ids, position) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (self.guild_id, key, draft.name, draft.emoji, draft.description, draft.welcome,
+             json.dumps(list(draft.staff_role_ids)), rows[0]["next_position"]),
+        )
+
+    async def delete_category(self, key):
+        # Retain category metadata for historical tickets and prevent default reseeding.
+        await self.execute(
+            "UPDATE ticket_categories SET is_active = 0, version = version + 1 "
+            "WHERE guild_id = %s AND category_key = %s AND is_active = 1",
+            (self.guild_id, key),
         )
 
     async def ticket_rows(self, condition, args):

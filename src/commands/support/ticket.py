@@ -43,7 +43,9 @@ class TicketPanel(discord.ui.View):
             discord.SelectOption(label=category["name"], value=category["category_key"],
                                  emoji=category["emoji"], description=category["description"])
             for category in categories
-        ]
+        ] or [discord.SelectOption(label="Aucune catégorie disponible", value="unavailable")]
+        self.children[0].disabled = not self.categories
+        self.children[0].placeholder = "Choisis le type de demande…" if self.categories else "Aucune catégorie disponible"
 
     async def interaction_check(self, interaction):
         if interaction.guild_id in GUILD_IDS and isinstance(interaction.user, discord.Member):
@@ -112,7 +114,7 @@ class Tickets(app_commands.Group):
             f"✅ {label} : <#{ticket.channel_id}>.", ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
-    @app_commands.command(name="categories", description="Personnaliser les catégories de tickets et leurs rôles de support.")
+    @app_commands.command(name="categories", description="Créer, supprimer et personnaliser les catégories de tickets.")
     @app_commands.check(lambda interaction: is_admin(interaction.user))
     async def categories(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)

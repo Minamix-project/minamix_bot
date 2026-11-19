@@ -638,6 +638,16 @@ concurrent overwrites. `/ticket create` autocompletion uses the current names.
 Category keys remain stable when renamed, so the per-category ticket limit is
 preserved.
 
+Use **Créer une catégorie** to draft a new category with its own generated key,
+texts, emoji and optional roles, then press **Créer** to publish it. Up to 25
+categories can be active per guild. The limit is checked again when saving.
+Choose an existing category and press **Supprimer** for a private confirmation.
+Confirming removes it from every public menu and from `/ticket create`, while
+existing tickets retain their category name, permissions, transcripts and normal
+management commands. Deleted categories stay archived internally, so defaults
+are not recreated on restart and names remain available in historical logs.
+If every category is deleted, public menus are disabled until another is created.
+
 Saving a category updates every public panel menu and all its existing ticket
 channels, including tickets whose panel was deleted. It changes channel topics,
 opening embeds and support permissions while preserving ticket numbers and
