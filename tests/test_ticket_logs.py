@@ -61,3 +61,24 @@ def test_transcript_notification_uses_same_layout_and_respects_long_reason_limit
         assert sent["allowed_mentions"].to_dict()["parse"] == []
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("logs_channel_id", [None, 12345])
+def test_absent_ticket_log_destination_never_uses_another_channel(logs_channel_id):
+    async def scenario():
+        env = destination()
+        await TicketService().log_action(env.guild, ticket(logs_channel_id=logs_channel_id), "created", 2)
+        env.current.send.assert_not_awaited()
+        env.panel.send.assert_not_awaited()
+    asyncio.run(scenario())
+
+
+def test_unusable_ticket_logs_do_not_abort_actions_or_fall_back_to_general_logs():
+    async def scenario():
+        env = destination()
+        env.panel.permissions_for.side_effect = None
+        env.panel.permissions_for.return_value = discord.Permissions.none()
+        await TicketService().log_action(env.guild, ticket(logs_channel_id=20), "created", 2)
+        env.current.send.assert_not_awaited()
+        env.panel.send.assert_not_awaited()
+    asyncio.run(scenario())

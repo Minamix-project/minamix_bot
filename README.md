@@ -545,7 +545,7 @@ and command names are in English. Open the private setup interface with no param
 ```
 
 Manage Server or Administrator is required. Choose **Créer un panneau** or
-**Gérer les panneaux**. The creation/editor wizard has five steps:
+**Gérer les panneaux**. The creation/editor wizard has six steps:
 
 1. **Nom et message**: a modal sets the manager name (1–80 characters), public
    title (up to 256 characters), and multiline text (up to 4,000 characters).
@@ -555,7 +555,9 @@ Manage Server or Administrator is required. Choose **Créer un panneau** or
 4. **Salon des transcripts**: optionally select a private text channel for the
    transcript files, or choose **Sans salon de transcripts**. Database storage
    remains enabled regardless of this choice.
-5. **Envoi du panneau**: select the destination text channel, then press
+5. **Salon des logs de tickets**: optionally select a text channel for ticket
+   action summaries, or choose **Sans envoi de logs**.
+6. **Envoi du panneau**: select the destination text channel, then press
    **Enregistrer et envoyer**.
 
 Each step has **Retour** and **Enregistrer et continuer**. Navigation retains the
@@ -576,10 +578,13 @@ request categories in French. Their menus work after restarts and clear after ev
 selection, including rejected requests, so members can select the same category
 again. Each panel footer shows the bot's name and avatar, including its default avatar.
 
-**Transcripts and general logs are separate.** The private transcript channel is
-selected per panel in the wizard. Ticket action summaries use the existing general
-log destination configured with `/setlogs`; they do not contain transcript files or
-message bodies. Setting a transcript destination does not change the general logs.
+**Transcripts, ticket logs and general logs have separate configuration.** The
+private transcript channel and optional ticket action log channel are selected
+independently per panel in the wizard. Ticket action summaries only use their
+configured destination, with no fallback to `/setlogs`; they do not contain
+transcript files or message bodies. Without a ticket log destination, no action
+summary is sent to Discord, while the database audit history remains available.
+Existing panels start without a ticket log channel; edit them to configure one.
 Ticket journals use the same moderation layout: action icon and color, named fields
 for the channel, ticket, category, creator and actor, a timestamp, the creator's
 avatar and the bot footer. Member changes also identify the affected member.
@@ -609,14 +614,32 @@ Ticket numbers are independent per server and channel names use `ticket-0001`,
 numbers are preserved by the migration; default channel names are padded on
 startup, while custom names remain unchanged.
 
-Each member can have one open ticket per server. New channels use explicit
-permissions for the creator, all configured support roles and the bot; other
+Each member can have one open ticket per help category per server. For example,
+one Shop ticket and one Report ticket may remain open together, but two Shop
+tickets are rejected even when opened through different panels or commands.
+New channels use explicit permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
-channels. Existing tickets retain the support roles and transcript destination configured
-when they were created. Category/role removal requires panel reconfiguration.
+channels. Existing tickets retain the support roles, transcript destination and
+ticket log destination configured when they were created. Category/role removal
+requires panel reconfiguration.
+
+Use `/ticket create reason:<choice> [user] [panel]` to open a ticket directly.
+The required `reason` dropdown contains the same six French categories as the
+public panel. `user` accepts a server member and is restricted to Administrator
+or Manage Server; the selected member owns the ticket, receives its welcome
+mention and close button, and is subject to the category limit. The administrator
+who runs the command is recorded as the actor. Bots and foreign members are
+rejected. Without `user`, the requesting member owns the ticket.
+
+The optional `panel` autocomplete lists only panels in channels the requesting
+member can see. If omitted, the command uses the only available panel in the
+current channel, or the only available panel in the server. Ambiguous choices
+require selecting `panel`. Each ticket uses that panel's channel category,
+support roles, transcripts and ticket log destination.
 
 | Command | Access and behavior |
 | --- | --- |
+| `/ticket create <reason> [user] [panel]` | Everyone; create directly, with `user` restricted to administration |
 | `/ticket add <user>` | Support role or administration; grant access to another member |
 | `/ticket remove <user>` | Support role or administration; deny that member access |
 | `/ticket rename <name>` | Support role or administration; rename the current ticket |
@@ -645,7 +668,8 @@ access read-only. Staff-role access and the bot's permissions are retained; Disc
 administrators still bypass overwrites. The bot saves the transcript and optionally
 uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
 remains available through `transcript`. Reopening by staff restores the saved permissions for the creator and previously added members;
-a second open ticket for the same creator prevents reopening. MySQL transactions,
+a second open ticket for the same creator and help category prevents reopening.
+Tickets in other help categories do not prevent reopening. MySQL transactions,
 a per-server lock and a unique constraint prevent duplicate opens. On ordinary
 Discord or database failures, completed channel changes are undone. Discord and
 MySQL cannot commit atomically: a process termination between their operations

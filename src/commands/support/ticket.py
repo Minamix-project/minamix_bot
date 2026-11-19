@@ -76,6 +76,42 @@ class Tickets(app_commands.Group):
         )
         view.message = await interaction.original_response()
 
+    @app_commands.command(name="create", description="Créer un ticket de support sans passer par le panneau.")
+    @app_commands.describe(
+        reason="Type de demande",
+        user="Membre pour lequel ouvrir le ticket (administration uniquement)",
+        panel="Panneau à utiliser si plusieurs sont disponibles ; facultatif sinon",
+    )
+    @app_commands.choices(reason=[app_commands.Choice(name=label, value=value) for value, label in CATEGORIES.items()])
+    async def create(
+        self, interaction: discord.Interaction, reason: str, user: discord.Member | None = None, panel: str | None = None
+    ):
+        await interaction.response.defer(ephemeral=True)
+        if panel is not None and (not panel.isascii() or not panel.isdecimal() or len(panel) > 20):
+            raise TicketError("Choisis un panneau proposé dans la liste du paramètre `panel`.")
+        ticket = await self.service.create(
+            interaction, reason, direct=True, user=user, panel_id=int(panel) if panel is not None else None
+        )
+        label = "Ton ticket a été créé" if ticket.creator_id == interaction.user.id else "Le ticket du membre a été créé"
+        await interaction.followup.send(
+            f"✅ {label} : <#{ticket.channel_id}>.", ephemeral=True, allowed_mentions=NO_MENTIONS
+        )
+
+    @create.autocomplete("panel")
+    async def create_panel_choices(self, interaction: discord.Interaction, current: str):
+        if interaction.guild_id not in GUILD_IDS or not isinstance(interaction.user, discord.Member):
+            return []
+        try:
+            panels = await self.service.creation_panels(interaction)
+        except TicketError:
+            # Autocomplete cannot display the normal private validation reply.
+            return []
+        query = current.casefold()
+        return [
+            app_commands.Choice(name=f"[{panel['id']}] {panel['name']}"[:100], value=str(panel["id"]))
+            for panel in panels if query in panel["name"].casefold() or query in str(panel["id"])
+        ][:25]
+
     @app_commands.command(name="add", description="Ajouter un membre au ticket (personnel autorisé).")
     @app_commands.describe(user="Membre à ajouter au ticket")
     async def add(self, interaction: discord.Interaction, user: discord.Member):

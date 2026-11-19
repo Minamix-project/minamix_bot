@@ -12,6 +12,7 @@ ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation
 
 _GENERAL = (
     "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
+    "`/ticket create <reason> [panel]` — Ouvrir un ticket sans passer par le panneau (un par catégorie)\n"
     "Pour fermer ton ticket, utilise le bouton **Fermer le ticket**, puis confirme.\n"
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
@@ -74,6 +75,7 @@ _MODERATION = (
 
 _ADMIN_TICKETS = (
     "`/ticket panel` — Créer, modifier, déplacer ou supprimer des panneaux avec l'assistant\n"
+    "`/ticket create <reason> [user] [panel]` — Créer un ticket ; `user` réservé à l'administration\n"
     "`/ticket add <user>` — Ajouter un membre au ticket\n"
     "`/ticket remove <user>` — Retirer un membre du ticket\n"
     "`/ticket rename <name>` — Renommer le salon du ticket\n"
@@ -87,7 +89,7 @@ _ADMIN_TICKETS = (
     "**Accès :** panneaux, régularisation et purge réservés à l'administration. "
     "La gestion des tickets est aussi ouverte aux rôles de support configurés.\n"
     "Le bouton de fermeture avec confirmation est réservé au créateur ; le personnel utilise `/ticket close`.\n"
-    "Les transcripts ont un salon dédié ; les logs d'actions utilisent `/setlogs`. "
+    "Les salons des transcripts et des logs de tickets se choisissent séparément dans chaque panneau. "
     "Consulte `/audit commande:ticket` pour l'historique administratif."
 )
 

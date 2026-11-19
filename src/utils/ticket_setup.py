@@ -143,7 +143,11 @@ class PanelTextModal(discord.ui.Modal):
 
 
 class PanelWizard(SetupView):
-    STEPS = ("Nom et message", "Rôles de support", "Catégorie des tickets", "Salon des transcripts", "Envoi du panneau")
+    STEPS = (
+        "Nom et message", "Rôles de support", "Catégorie des tickets", "Salon des transcripts",
+        "Salon des logs de tickets", "Envoi du panneau",
+    )
+    CHANNEL_FIELDS = {2: "category_id", 3: "transcript_channel_id", 4: "logs_channel_id", 5: "channel_id"}
 
     def __init__(self, context, draft=None, *, step=0):
         super().__init__(context)
@@ -158,12 +162,16 @@ class PanelWizard(SetupView):
             "Sélectionne de 1 à 10 rôles qui pourront voir et gérer les tickets ouverts depuis ce panneau.",
             "Sélectionne la catégorie Discord dans laquelle Aurum créera les salons privés.",
             "Choisis un salon privé pour recevoir les fichiers d'historique, ou continue sans salon. "
-            "Les transcripts restent sauvegardés. Les journaux d'actions utilisent le salon général défini avec `/setlogs`.",
+            "Les transcripts restent sauvegardés.",
+            "Choisis un salon pour les journaux d'actions des tickets de ce panneau, ou continue sans envoi de logs. "
+            "Le salon des logs généraux n'est pas utilisé automatiquement.",
             "Choisis le salon où envoyer ce panneau. Vérifie les choix puis enregistre et envoie le panneau.",
         )
-        embed = setup_embed(interaction, f"Étape {self.step + 1}/5 — {self.STEPS[self.step]}", instructions[self.step])
+        embed = setup_embed(
+            interaction, f"Étape {self.step + 1}/{len(self.STEPS)} — {self.STEPS[self.step]}", instructions[self.step]
+        )
         embed.add_field(name="Nom du panneau", value=discord.utils.escape_markdown(draft.name), inline=False)
-        if self.step in (0, 4):
+        if self.step in (0, len(self.STEPS) - 1):
             embed.add_field(name="Titre affiché", value=draft.title or DEFAULT_PANEL_TITLE, inline=False)
             embed.add_field(name="Texte affiché", value=(draft.text or DEFAULT_PANEL_TEXT)[:1000], inline=False)
         embed.add_field(
@@ -173,6 +181,9 @@ class PanelWizard(SetupView):
         embed.add_field(
             name="Transcripts",
             value=f"<#{draft.transcript_channel_id}>" if draft.transcript_channel_id else "Sans envoi dans un salon",
+        )
+        embed.add_field(
+            name="Logs de tickets", value=f"<#{draft.logs_channel_id}>" if draft.logs_channel_id else "Sans envoi de logs"
         )
         embed.add_field(name="Salon du panneau", value=f"<#{draft.channel_id}>" if draft.channel_id else "À choisir")
         return embed
@@ -194,16 +205,17 @@ class PanelWizard(SetupView):
             select.callback = self.select_roles
             self.add_item(select)
         else:
-            field = {2: "category_id", 3: "transcript_channel_id", 4: "channel_id"}[self.step]
+            field = self.CHANNEL_FIELDS[self.step]
             selected = guild.get_channel(getattr(draft, field)) if getattr(draft, field) else None
             select = discord.ui.ChannelSelect(
                 placeholder={
                     2: "Catégorie des salons de tickets…",
                     3: "Salon privé des transcripts (facultatif)…",
-                    4: "Salon d'envoi du panneau…",
+                    4: "Salon des logs de tickets (facultatif)…",
+                    5: "Salon d'envoi du panneau…",
                 }[self.step],
                 channel_types=[discord.ChannelType.category if self.step == 2 else discord.ChannelType.text],
-                min_values=0 if self.step == 3 else 1,
+                min_values=0 if self.step in (3, 4) else 1,
                 max_values=1,
                 default_values=[selected] if selected else [],
                 row=0,
@@ -212,9 +224,11 @@ class PanelWizard(SetupView):
             self.add_item(select)
             if self.step == 3:
                 self.button("Sans salon de transcripts", self.clear_transcripts, row=1)
+            elif self.step == 4:
+                self.button("Sans envoi de logs", self.clear_logs, row=1)
         self.button("Retour", self.back, row=2)
         self.button(
-            "Enregistrer et continuer" if self.step < 4 else "Enregistrer et envoyer",
+            "Enregistrer et continuer" if self.step < len(self.STEPS) - 1 else "Enregistrer et envoyer",
             self.advance,
             row=2,
             style=discord.ButtonStyle.success,
@@ -238,7 +252,7 @@ class PanelWizard(SetupView):
     async def select_channel(self, interaction):
         values = interaction.data["values"]
         channel_id = int(values[0]) if values else None
-        field = {2: "category_id", 3: "transcript_channel_id", 4: "channel_id"}[self.step]
+        field = self.CHANNEL_FIELDS[self.step]
         channel = interaction.guild.get_channel(channel_id) if channel_id else None
         if self.step == 2:
             if not isinstance(channel, discord.CategoryChannel):
@@ -249,7 +263,7 @@ class PanelWizard(SetupView):
                 raise TicketError("Tu dois pouvoir voir le salon sélectionné.")
             if self.step == 3 and channel.permissions_for(interaction.guild.default_role).view_channel:
                 raise TicketError("Le salon des transcripts doit être privé.")
-        elif self.step != 3:
+        elif self.step not in (3, 4):
             raise TicketError("Choisis un salon avant de continuer.")
         setattr(self.draft, field, channel_id)
         self.generation += 1
@@ -257,6 +271,11 @@ class PanelWizard(SetupView):
 
     async def clear_transcripts(self, interaction):
         self.draft.transcript_channel_id = None
+        self.generation += 1
+        await self.render(interaction)
+
+    async def clear_logs(self, interaction):
+        self.draft.logs_channel_id = None
         self.generation += 1
         await self.render(interaction)
 
@@ -276,7 +295,7 @@ class PanelWizard(SetupView):
             raise TicketError("Sélectionne au moins un rôle de support avant de continuer.")
         if self.step == 2 and not self.draft.category_id:
             raise TicketError("Sélectionne une catégorie avant de continuer.")
-        if self.step < 4:
+        if self.step < len(self.STEPS) - 1:
             self.step += 1
             self.generation += 1
             await self.render(interaction)
@@ -331,6 +350,10 @@ class PanelManager(SetupView):
                 if panel["transcript_channel_id"]
                 else "Sans envoi dans un salon",
             )
+            embed.add_field(
+                name="Logs de tickets",
+                value=f"<#{panel['logs_channel_id']}>" if panel["logs_channel_id"] else "Sans envoi de logs",
+            )
         return embed
 
     def build(self, guild):
@@ -380,7 +403,9 @@ class PanelManager(SetupView):
     async def send(self, interaction):
         if not self.selected:
             raise TicketError("Sélectionne un panneau à envoyer.")
-        await self.show(interaction, PanelWizard(self.context, PanelDraft.from_panel(self.selected), step=4))
+        await self.show(
+            interaction, PanelWizard(self.context, PanelDraft.from_panel(self.selected), step=len(PanelWizard.STEPS) - 1)
+        )
 
     async def ask_delete(self, interaction):
         if not self.selected:

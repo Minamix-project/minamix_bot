@@ -333,6 +333,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
             assert group.default_permissions is None
             assert {item.name for item in group.commands} == {
                 "panel",
+                "create",
                 "add",
                 "remove",
                 "rename",
@@ -479,9 +480,9 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         assert welcome.kwargs["view"].is_persistent()
         async with store.ticket_session(999) as other:
             assert await other.get(opened.channel_id) is None
-            assert await other.active(2) is None
+            assert await other.active(2, "report") is None
         with pytest.raises(store.TicketError, match="déjà"):
-            await manager.create(env.interaction, "shop")
+            await manager.create(env.interaction, "report")
         env.interaction.channel, env.interaction.channel_id = env.channels[40], 40
         await store.record_staff_message(1, 40, env.outsider)
         await store.record_staff_message(1, 40, env.staff)
@@ -539,10 +540,10 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         with pytest.raises(aiomysql.IntegrityError):
             async with store.ticket_session(1) as session:
                 panel = (await session.panels())[0]
-                await session.create(41, 2, "general", panel)
+                await session.create(41, 2, "report", panel)
         # Rollback releases the named lock and preserves the original record.
         async with store.ticket_session(1) as session:
-            assert (await session.active(2)).id == reopened.id
+            assert (await session.active(2, "report")).id == reopened.id
             assert await session.get(41) is None
             audits = await session.rows("SELECT action FROM admin_audit WHERE guild_id = 1 AND action LIKE 'ticket.%'")
             assert any(f"#{opened.reference}" in row["action"] for row in audits)
@@ -629,6 +630,7 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
             30,
             (5,),
             None,
+            logs_channel_id=None,
             panel_id=1,
             name="Support",
             title=service.DEFAULT_PANEL_TITLE,
@@ -899,6 +901,10 @@ def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequen
                         "SELECT value FROM guild_config WHERE guild_id = 1 AND config_key = 'logs_channel'"
                     )
                     assert (await cursor.fetchone())[0] == "50"
+                    await cursor.execute("SELECT logs_channel_id FROM ticket_panels WHERE guild_id = 1")
+                    assert (await cursor.fetchone())[0] is None
+                    await cursor.execute("SELECT logs_channel_id FROM tickets WHERE id = 11")
+                    assert (await cursor.fetchone())[0] is None
             finally:
                 db.close()
         finally:
@@ -936,20 +942,13 @@ def test_stale_panel_editor_is_rejected_before_publishing(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_general_action_logs_and_transcript_files_have_separate_destinations(monkeypatch):
+def test_ticket_action_logs_and_transcript_files_have_separate_destinations():
     async def scenario():
         env = destination()
-        cursor = AsyncMock()
-        cursor.fetchone.return_value = ("10",)
-        context = AsyncMock()
-        context.__aenter__.return_value = cursor
-        db = Mock()
-        db.cursor.return_value = context
-        monkeypatch.setattr(service, "get_db_connection", AsyncMock(return_value=db))
-        closed = ticket(transcript_channel_id=20, closed_by=2, close_reason="Résolu")
+        closed = ticket(logs_channel_id=10, transcript_channel_id=20, closed_by=2, close_reason="Résolu")
         manager = service.TicketService()
         await manager.log_action(env.guild, closed, "closed", 2)
-        assert "'logs_channel'" in cursor.execute.await_args.args[0]
+        env.current.send.assert_awaited_once()
         assert "file" not in env.current.send.await_args.kwargs
         assert await manager.send_transcript(env.guild, closed, b"private messages") is None
         assert env.panel.send.await_args.kwargs["file"].filename == "ticket-0001.txt"
@@ -979,7 +978,6 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
         )
 
     monkeypatch.setattr(store, "get_db_connection", connect)
-    monkeypatch.setattr(service, "get_db_connection", connect)
 
     async def scenario():
         db = await connect()
@@ -992,15 +990,19 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             db.close()
         async with store.ticket_session(1) as session:
             first_id = await session.save_panel(
-                20, 200, 30, (5, 6), 60, name="Support RP", title="RP", text="Explique ton problème."
+                20, 200, 30, (5, 6), 60, logs_channel_id=70,
+                name="Support RP", title="RP", text="Explique ton problème."
             )
-            second_id = await session.save_panel(20, 201, 31, (7,), 61, name="Boutique")
+            second_id = await session.save_panel(20, 201, 31, (7,), 61, logs_channel_id=71, name="Boutique")
             first = await session.panel_for_message(20, 200)
             second = await session.panel_for_message(20, 201)
             assert first["id"] == first_id and second["id"] == second_id
+            assert first["logs_channel_id"] == 70 and second["logs_channel_id"] == 71
             await session.create(40, 2, "rp", first)
             old_ticket = await session.get(40)
-            await session.save_panel(21, 210, 32, (8,), 62, panel_id=first_id, name="Support RP modifié")
+            await session.save_panel(
+                21, 210, 32, (8,), 62, logs_channel_id=72, panel_id=first_id, name="Support RP modifié"
+            )
         # A restart resolves each panel by its own message and retains optimistic edit versions.
         async with store.ticket_session(1) as session:
             assert await session.panel_for_message(20, 200) is None
@@ -1009,8 +1011,32 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             assert (await session.panel(first_id))["version"] == 2
             retained = await session.get(40)
             assert retained.staff_role_ids == (5, 6) and retained.transcript_channel_id == 60
+            assert retained.logs_channel_id == 70
+            assert (await session.panel(first_id))["logs_channel_id"] == 72
             assert retained.panel_id == first_id
             assert len(await session.panels()) == 2
+
+        # The limit follows the help category across panels, including at SQL level.
+        async with store.ticket_session(1) as session:
+            second = await session.panel(second_id)
+            await session.create(41, 2, "shop", second)
+            assert (await session.active(2, "rp")).id == old_ticket.id
+            assert (await session.active(2, "shop")).channel_id == 41
+        with pytest.raises(aiomysql.IntegrityError):
+            async with store.ticket_session(1) as session:
+                await session.create(42, 2, "rp", await session.panel(second_id))
+        async with store.ticket_session(1) as session:
+            retained = await session.get(40)
+            await session.close(retained, 3, "Résolu", [])
+            await session.create(42, 2, "rp", await session.panel(second_id))
+        with pytest.raises(aiomysql.IntegrityError):
+            async with store.ticket_session(1) as session:
+                await session.reopen(retained)
+        async with store.ticket_session(1) as session:
+            await session.close(await session.get(42), 3, "Résolu", [])
+            await session.reopen(retained)
+            assert (await session.active(2, "rp")).id == old_ticket.id
+            assert (await session.active(2, "shop")).channel_id == 41
         async with store.ticket_session(999) as foreign:
             assert await foreign.panel(first_id) is None
             assert await foreign.panel_for_message(20, 201) is None
@@ -1022,5 +1048,6 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             retained = await session.get(40)
             assert retained.id == old_ticket.id and retained.panel_id is None
             assert retained.staff_role_ids == (5, 6) and retained.transcript_channel_id == 60
+            assert retained.logs_channel_id == 70
 
     asyncio.run(scenario())

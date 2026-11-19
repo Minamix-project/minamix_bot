@@ -36,6 +36,7 @@ class PanelDraft:
     staff_role_ids: tuple[int, ...] = ()
     category_id: int | None = None
     transcript_channel_id: int | None = None
+    logs_channel_id: int | None = None
     channel_id: int | None = None
     version: int = 0
 
@@ -49,6 +50,7 @@ class PanelDraft:
             staff_role_ids=tuple(panel["staff_role_ids"]),
             category_id=panel["category_id"],
             transcript_channel_id=panel["transcript_channel_id"],
+            logs_channel_id=panel["logs_channel_id"],
             channel_id=panel["channel_id"],
             version=panel["version"],
         )
@@ -73,6 +75,7 @@ class Ticket:
     active_creator: int | None = None
     ticket_number: int | None = None
     panel_id: int | None = None
+    logs_channel_id: int | None = None
 
     @classmethod
     def from_row(cls, row):
@@ -125,6 +128,7 @@ class TicketSession:
         staff_role_ids,
         transcript_channel_id,
         *,
+        logs_channel_id=None,
         panel_id=None,
         name="Support",
         title=None,
@@ -136,6 +140,7 @@ class TicketSession:
             category_id,
             json.dumps(list(staff_role_ids)),
             transcript_channel_id,
+            logs_channel_id,
             name,
             title,
             text,
@@ -143,12 +148,12 @@ class TicketSession:
         if panel_id is None:
             return await self.execute(
                 "INSERT INTO ticket_panels (channel_id, message_id, category_id, staff_role_ids, transcript_channel_id, "
-                "name, title, description, guild_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "logs_channel_id, name, title, description, guild_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (*values, self.guild_id),
             )
         await self.execute(
             "UPDATE ticket_panels SET channel_id = %s, message_id = %s, category_id = %s, staff_role_ids = %s, "
-            "transcript_channel_id = %s, name = %s, title = %s, description = %s, version = version + 1 "
+            "transcript_channel_id = %s, logs_channel_id = %s, name = %s, title = %s, description = %s, version = version + 1 "
             "WHERE guild_id = %s AND id = %s",
             (*values, self.guild_id, panel_id),
         )
@@ -164,10 +169,10 @@ class TicketSession:
         )
         return Ticket.from_row(rows[0]) if rows else None
 
-    async def active(self, creator_id):
+    async def active(self, creator_id, category):
         rows = await self.rows(
-            "SELECT * FROM tickets WHERE guild_id = %s AND active_creator = %s",
-            (self.guild_id, creator_id),
+            "SELECT * FROM tickets WHERE guild_id = %s AND active_creator = %s AND category = %s",
+            (self.guild_id, creator_id, category),
         )
         return Ticket.from_row(rows[0]) if rows else None
 
@@ -215,8 +220,9 @@ class TicketSession:
         if number is None:
             number = await self.next_number()
         return await self.execute(
-            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, ticket_number, panel_id, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, "
+            "logs_channel_id, ticket_number, panel_id, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
             (
                 self.guild_id,
                 channel_id,
@@ -224,6 +230,7 @@ class TicketSession:
                 category,
                 json.dumps(list(panel["staff_role_ids"])),
                 panel["transcript_channel_id"],
+                panel.get("logs_channel_id"),
                 number,
                 panel.get("id"),
             ),

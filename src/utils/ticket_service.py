@@ -12,7 +12,6 @@ import discord
 from src.utils.ticket_controls import TicketCloseView, ticket_embed
 from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
-from src.utils.db import get_db_connection
 from src.utils.tickets import CATEGORIES, TicketError, ticket_session
 
 logger = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ DEFAULT_PANEL_TITLE = "Besoin d’aide ?"
 DEFAULT_PANEL_TEXT = (
     "Choisis le type de demande ci-dessous.\n"
     "Aurum ouvrira un salon privé avec le personnel autorisé.\n"
-    "Un seul ticket peut être ouvert par membre.\n"
+    "Un seul ticket par catégorie d'aide peut être ouvert par membre.\n"
     "À la fermeture, un historique sera conservé pour le support."
 )
 EVENT_LABELS = {
@@ -82,7 +81,7 @@ def validate_text_channel(channel, guild, *, attachments=False):
         )
 
 
-def validate_setup(guild, channel, category, staff_roles, transcript_channel):
+def validate_setup(guild, channel, category, staff_roles, transcript_channel, logs_channel=None):
     validate_text_channel(channel, guild)
     if not isinstance(category, discord.CategoryChannel) or category.guild.id != guild.id:
         raise TicketError("Choisis une catégorie Discord de ce serveur pour les tickets.")
@@ -99,6 +98,8 @@ def validate_setup(guild, channel, category, staff_roles, transcript_channel):
         validate_text_channel(transcript_channel, guild, attachments=True)
         if transcript_channel.permissions_for(guild.default_role).view_channel:
             raise TicketError("Le salon des transcripts doit être privé pour protéger le contenu des tickets.")
+    if logs_channel is not None:
+        validate_text_channel(logs_channel, guild)
 
 
 def member_overwrite():
@@ -280,9 +281,14 @@ class TicketService:
         category = guild.get_channel(draft.category_id)
         staff_roles = [guild.get_role(role_id) for role_id in draft.staff_role_ids]
         transcript_channel = guild.get_channel(draft.transcript_channel_id) if draft.transcript_channel_id else None
+        logs_channel = guild.get_channel(draft.logs_channel_id) if draft.logs_channel_id else None
         if draft.transcript_channel_id and transcript_channel is None:
             raise TicketError("Le salon des transcripts n'existe plus. Sélectionne un autre salon.")
-        validate_setup(guild, channel, category, staff_roles, transcript_channel)
+        if draft.logs_channel_id and logs_channel is None:
+            raise TicketError("Le salon des logs de tickets n'existe plus. Sélectionne un autre salon.")
+        validate_setup(guild, channel, category, staff_roles, transcript_channel, logs_channel)
+        if logs_channel and not logs_channel.permissions_for(interaction.user).view_channel:
+            raise TicketError("Tu dois pouvoir voir le salon des logs de tickets.")
         if not channel.permissions_for(interaction.user).view_channel:
             raise TicketError("Tu dois pouvoir voir le salon du panneau.")
         name = draft.name.strip()
@@ -320,6 +326,7 @@ class TicketService:
                 category.id,
                 draft.staff_role_ids,
                 draft.transcript_channel_id,
+                logs_channel_id=draft.logs_channel_id,
                 panel_id=draft.id,
                 name=name,
                 title=title,
@@ -363,37 +370,70 @@ class TicketService:
                 (interaction.guild_id, interaction.user.id, f"ticket.panel_delete: id={panel_id}"),
             )
 
-    async def create(self, interaction, category):
+    @staticmethod
+    def visible_panels(interaction, panels):
+        return [
+            panel for panel in panels
+            if isinstance(channel := interaction.guild.get_channel(panel["channel_id"]), discord.TextChannel)
+            and channel.permissions_for(interaction.user).view_channel
+        ]
+
+    async def creation_panels(self, interaction):
+        async with ticket_session(interaction.guild_id) as session:
+            return self.visible_panels(interaction, await session.panels())
+
+    async def create(self, interaction, category, *, direct=False, user=None, panel_id=None):
         if category not in CATEGORIES:
             raise TicketError("Cette catégorie de ticket est inconnue.")
+        if user is not None and not is_admin(interaction.user):
+            raise TicketError("Seule l'administration peut créer un ticket pour un autre membre avec `user`.")
+        creator = user if user is not None else interaction.user
+        if creator.guild.id != interaction.guild_id or creator.bot:
+            raise TicketError("Choisis un membre de ce serveur qui n'est pas un bot.")
         async with operation(interaction.guild_id) as (session, undo):
-            panel = await session.panel_for_message(interaction.channel_id, interaction.message.id)
+            if direct:
+                panels = self.visible_panels(interaction, await session.panels())
+                if panel_id is not None:
+                    panel = next((panel for panel in panels if panel["id"] == panel_id), None)
+                    if panel is None:
+                        raise TicketError("Ce panneau n'est plus disponible ou tu n'as pas accès à son salon.")
+                else:
+                    local = [panel for panel in panels if panel["channel_id"] == interaction.channel_id]
+                    candidates = local if local else panels
+                    if not candidates:
+                        raise TicketError("Aucun panneau de support n'est disponible. Contacte l'administration.")
+                    if len(candidates) != 1:
+                        raise TicketError("Plusieurs panneaux sont disponibles. Choisis-en un avec le paramètre `panel`.")
+                    panel = candidates[0]
+            else:
+                panel = await session.panel_for_message(interaction.channel_id, interaction.message.id)
             if panel is None:
                 raise TicketError("Ce panneau n'est plus actif. Utilise un panneau de support disponible.")
-            active = await session.active(interaction.user.id)
+            active = await session.active(creator.id, category)
             if active:
+                owner = "Tu as" if creator.id == interaction.user.id else "Ce membre a"
                 if interaction.guild.get_channel(active.channel_id) is not None:
-                    raise TicketError(f"Tu as déjà un ticket ouvert : <#{active.channel_id}>.")
+                    raise TicketError(f"{owner} déjà un ticket ouvert dans cette catégorie : <#{active.channel_id}>.")
                 raise TicketError(
-                    "Ton précédent ticket a été supprimé. Le personnel doit régulariser son état "
+                    "Le précédent ticket de cette catégorie a été supprimé. Le personnel doit régulariser son état "
                     "avec `/ticket reconcile` avant d'en créer un autre."
                 )
             guild = interaction.guild
             destination = guild.get_channel(panel["category_id"])
             staff_roles = [guild.get_role(role_id) for role_id in panel["staff_role_ids"]]
-            validate_setup(guild, interaction.channel, destination, staff_roles, None)
+            validate_setup(guild, guild.get_channel(panel["channel_id"]), destination, staff_roles, None)
             if len(destination.channels) >= 50:
                 raise TicketError("La catégorie de support est pleine. Contacte le personnel.")
             number = await session.next_number()
             channel = await guild.create_text_channel(
                 f"ticket-{number:04d}",
                 category=destination,
-                overwrites=private_overwrites(guild, interaction.user, staff_roles),
-                topic=f"Aurum | {CATEGORIES[category]} | {interaction.user.id}",
+                overwrites=private_overwrites(guild, creator, staff_roles),
+                topic=f"Aurum | {CATEGORIES[category]} | {creator.id}",
                 reason="Création d'un ticket de support",
             )
             undo.append(channel.delete)
-            await session.create(channel.id, interaction.user.id, category, panel, number=number)
+            await session.create(channel.id, creator.id, category, panel, number=number)
             ticket = await session.get(channel.id)
             await session.event(
                 ticket,
@@ -410,11 +450,11 @@ class TicketService:
             )
             embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
             await channel.send(
-                f"Bienvenue <@{interaction.user.id}> !",
+                f"Bienvenue <@{creator.id}> !",
                 embed=embed,
                 view=TicketCloseView(self),
                 allowed_mentions=discord.AllowedMentions(
-                    everyone=False, roles=False, users=[interaction.user], replied_user=False
+                    everyone=False, roles=False, users=[creator], replied_user=False
                 ),
             )
         await self.log_action(interaction.guild, ticket, "created", interaction.user.id)
@@ -452,8 +492,8 @@ class TicketService:
             if action == "reopened":
                 if ticket.status != "closed":
                     raise TicketError("Ce ticket est déjà ouvert.")
-                if await session.active(ticket.creator_id):
-                    raise TicketError("Le créateur possède déjà un autre ticket ouvert.")
+                if await session.active(ticket.creator_id, ticket.category):
+                    raise TicketError("Le créateur possède déjà un autre ticket ouvert dans cette catégorie.")
                 if not ticket.saved_overwrites:
                     raise TicketError("Les permissions d'origine de ce ticket ne sont pas disponibles.")
                 overwrites = await deserialize_overwrites(interaction.guild, json.loads(ticket.saved_overwrites))
@@ -627,21 +667,12 @@ class TicketService:
         return None
 
     async def log_action(self, guild, ticket, action, actor_id, *, detail=None):
-        """Send action summaries to the existing general log channel, without transcripts."""
+        """Send summaries only to the ticket's optional, panel-specific destination."""
+        if not ticket.logs_channel_id:
+            return
         try:
-            db = await get_db_connection()
-            try:
-                async with db.cursor() as cursor:
-                    await cursor.execute(
-                        "SELECT value FROM guild_config WHERE guild_id = %s AND config_key = 'logs_channel'",
-                        (guild.id,),
-                    )
-                    row = await cursor.fetchone()
-            finally:
-                db.close()
-            channel = guild.get_channel(int(row[0])) if row else None
-            if not isinstance(channel, discord.TextChannel):
-                return
+            channel = guild.get_channel(ticket.logs_channel_id)
+            validate_text_channel(channel, guild)
             embed = build_ticket_log(guild, ticket, action, actor_id, detail=detail)
             await channel.send(embed=embed, allowed_mentions=NO_MENTIONS)
         except Exception as exc:
