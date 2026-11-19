@@ -180,6 +180,56 @@ def archive_overwrites(guild, overwrites, staff_role_ids, *, creator_id):
     return result
 
 
+def replace_staff_overwrites(guild, ticket, overwrites, staff_roles):
+    """Replace managed role grants while retaining explicit participant access."""
+    new_ids = {role.id for role in staff_roles}
+    removed_ids = set(ticket.staff_role_ids) - new_ids
+    updated = {
+        target: discord.PermissionOverwrite.from_pair(*overwrite.pair())
+        for target, overwrite in overwrites.items()
+        if not (isinstance(target, discord.Role) and target.id in removed_ids)
+    }
+    for role in staff_roles:
+        updated[role] = member_overwrite()
+    default = updated.setdefault(guild.default_role, discord.PermissionOverwrite())
+    default.view_channel = False
+    for target, overwrite in updated.items():
+        if (
+            isinstance(target, discord.Member)
+            and target.id not in {ticket.creator_id, guild.me.id}
+            and is_staff(target, new_ids)
+        ):
+            # A former guest's explicit removal must not block new support access.
+            overwrite.view_channel = True
+    if ticket.status == "closed":
+        updated = archive_overwrites(guild, updated, new_ids, creator_id=ticket.creator_id)
+    return updated
+
+
+def replace_saved_staff(guild, ticket, staff_roles):
+    """Update a closed ticket's future permissions without losing unresolved members."""
+    if ticket.saved_overwrites is None:
+        return None
+    retained = [
+        entry for entry in json.loads(ticket.saved_overwrites)
+        if not (entry["type"] == "role" and entry["id"] in ticket.staff_role_ids)
+    ]
+    new_ids = {role.id for role in staff_roles}
+    retained = [entry for entry in retained if not (entry["type"] == "role" and entry["id"] in new_ids)]
+    for entry in retained:
+        if entry["type"] != "member" or entry["id"] in {ticket.creator_id, guild.me.id}:
+            continue
+        member = guild.get_member(entry["id"])
+        if member is not None and is_staff(member, new_ids):
+            overwrite = discord.PermissionOverwrite.from_pair(
+                discord.Permissions(entry["allow"]), discord.Permissions(entry["deny"]),
+            )
+            overwrite.view_channel = True
+            allow, deny = overwrite.pair()
+            entry.update(allow=allow.value, deny=deny.value)
+    return json.dumps([*retained, *serialize_overwrites({role: member_overwrite() for role in staff_roles})])
+
+
 def transcript_file(ticket, content):
     return discord.File(io.BytesIO(content), filename=f"ticket-{ticket.reference}.txt")
 
@@ -273,6 +323,34 @@ class TicketService:
         async with ticket_session(interaction.guild_id) as session:
             return await session.panels()
 
+    async def sync_panel_roles(self, guild, panel_id, staff_roles, session, undo):
+        role_ids = tuple(role.id for role in staff_roles)
+        plans = []
+        for ticket in await session.for_panel(panel_id):
+            if set(ticket.staff_role_ids) == set(role_ids):
+                continue
+            channel = guild.get_channel(ticket.channel_id)
+            if channel is None:
+                try:
+                    channel = await guild.fetch_channel(ticket.channel_id)
+                except discord.NotFound:
+                    continue
+            if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
+                raise TicketError(f"Le salon du ticket #{ticket.reference} n'est pas un salon textuel de ce serveur.")
+            permissions = channel.permissions_for(guild.me)
+            if not (permissions.manage_channels and permissions.manage_roles):
+                raise TicketError(
+                    f"Le bot doit pouvoir gérer le salon et les permissions du ticket #{ticket.reference} "
+                    "pour actualiser les rôles du panneau."
+                )
+            old = channel.overwrites
+            updated = replace_staff_overwrites(guild, ticket, old, staff_roles)
+            plans.append((ticket, channel, old, updated, replace_saved_staff(guild, ticket, staff_roles)))
+        for ticket, channel, old, updated, saved in plans:
+            await channel.edit(overwrites=updated, reason="Mise à jour des rôles de support du panneau")
+            undo.append(lambda channel=channel, old=old: channel.edit(overwrites=old))
+            await session.update_staff(ticket, role_ids, saved)
+
     async def panel(self, interaction, draft, view):
         if not is_admin(interaction.user):
             raise TicketError("Cette action est réservée à l'administration du serveur.")
@@ -305,6 +383,8 @@ class TicketService:
                 raise TicketError("Ce panneau a été modifié ou supprimé. Rouvre le gestionnaire avant de l'éditer.")
             if await session.get(channel.id):
                 raise TicketError("Le panneau doit être envoyé dans un salon qui n'est pas un ticket.")
+            if previous:
+                await self.sync_panel_roles(guild, draft.id, staff_roles, session, undo)
             message = None
             if previous and previous["channel_id"] == channel.id:
                 try:

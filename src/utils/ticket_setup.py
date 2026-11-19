@@ -159,7 +159,8 @@ class PanelWizard(SetupView):
         draft = self.draft
         instructions = (
             "Ouvre le formulaire pour définir le nom du panneau, son titre et son texte. Les champs vides gardent le message par défaut.",
-            "Sélectionne de 1 à 10 rôles qui pourront voir et gérer les tickets ouverts depuis ce panneau.",
+            "Sélectionne de 1 à 10 rôles qui pourront voir et gérer les tickets de ce panneau. "
+            "À l'enregistrement, les rôles seront aussi actualisés dans ses tickets existants.",
             "Sélectionne la catégorie Discord dans laquelle Aurum créera les salons privés.",
             "Choisis un salon privé pour recevoir les fichiers d'historique, ou continue sans salon. "
             "Les transcripts restent sauvegardés.",

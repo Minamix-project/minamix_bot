@@ -613,6 +613,7 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
         draft = store.PanelDraft(id=1, staff_role_ids=(5,), category_id=30, channel_id=20, version=1)
         session = SimpleNamespace(
             panel=AsyncMock(return_value={"id": 1, "channel_id": 20, "message_id": 200, "version": 1}),
+            for_panel=AsyncMock(return_value=[]),
             save_panel=AsyncMock(return_value=1),
             execute=AsyncMock(),
             get=AsyncMock(return_value=None),

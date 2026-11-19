@@ -619,9 +619,16 @@ one Shop ticket and one Report ticket may remain open together, but two Shop
 tickets are rejected even when opened through different panels or commands.
 New channels use explicit permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
-channels. Existing tickets retain the support roles, transcript destination and
-ticket log destination configured when they were created. Category/role removal
-requires panel reconfiguration.
+channels. Saving an edited panel synchronizes its support roles to all attached
+ticket channels, including tickets opened before the edit. Removed roles lose
+their managed grants, and new roles gain support access; explicit creator and
+guest permissions are preserved. Closed tickets remain private and read-only,
+and their saved reopening permissions receive the same role changes. The bot
+checks access to every affected channel before editing and restores completed
+Discord changes if persistence fails. Deleted channels are skipped. Re-saving
+the same panel also repairs stale role snapshots from an earlier edit.
+Transcript and ticket log destinations retain their creation-time values.
+Category/role removal requires panel reconfiguration.
 
 Use `/ticket create reason:<choice> [user] [panel]` to open a ticket directly.
 The required `reason` dropdown contains the same six French categories as the

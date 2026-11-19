@@ -194,6 +194,19 @@ class TicketSession:
         rows = await self.rows("SELECT * FROM tickets WHERE guild_id = %s ORDER BY id", (self.guild_id,))
         return [Ticket.from_row(row) for row in rows]
 
+    async def for_panel(self, panel_id):
+        rows = await self.rows(
+            "SELECT * FROM tickets WHERE guild_id = %s AND panel_id = %s ORDER BY id",
+            (self.guild_id, panel_id),
+        )
+        return [Ticket.from_row(row) for row in rows]
+
+    async def update_staff(self, ticket, role_ids, saved_overwrites):
+        await self.execute(
+            "UPDATE tickets SET staff_role_ids = %s, saved_overwrites = %s WHERE guild_id = %s AND id = %s",
+            (json.dumps(list(role_ids)), saved_overwrites, self.guild_id, ticket.id),
+        )
+
     async def purge(self):
         # Use the history subsystem's state lock to keep its counters consistent.
         await self.rows(
