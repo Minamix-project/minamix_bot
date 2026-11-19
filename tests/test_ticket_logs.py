@@ -28,7 +28,7 @@ def test_ticket_log_uses_named_fields_timestamp_bot_footer_and_creator_avatar(ac
     fields = {field.name: field.value for field in embed.fields}
     assert fields["Salon"] == "<#10> (`10`)"
     assert fields["Ticket"] == "#0001"
-    assert fields["Catégorie"] == "Signalement"
+    assert fields["Catégorie"] == "Plaintes"
     assert "<@2> (`2`)" in fields["Créateur"]
     assert "<@3> (`3`)" in fields["Par"]
     assert embed.timestamp is not None

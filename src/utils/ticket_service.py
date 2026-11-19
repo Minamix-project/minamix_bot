@@ -12,7 +12,7 @@ import discord
 from src.utils.ticket_controls import TicketCloseView, ticket_embed
 from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
-from src.utils.tickets import CATEGORIES, TicketError, ticket_session
+from src.utils.tickets import CATEGORIES, CATEGORY_OPTIONS, TicketError, category_label, ticket_session
 
 logger = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -249,7 +249,7 @@ async def build_transcript(channel, ticket, session):
         f"Serveur : {ticket.guild_id}",
         f"Salon : {channel.name} ({channel.id})",
         f"Créateur : {ticket.creator_id}",
-        f"Catégorie : {CATEGORIES[ticket.category]}",
+        f"Catégorie : {category_label(ticket.category)}",
         f"Création : {utc_label(ticket.created_at)}",
         f"État : {'Fermé' if ticket.status == 'closed' else 'Ouvert'}",
         f"Utilisateur concerné : {ticket.subject_id or '—'}",
@@ -522,10 +522,11 @@ class TicketService:
                 CATEGORIES[category],
                 staff=is_staff(interaction.user, ticket.staff_role_ids),
             )
+            option = CATEGORY_OPTIONS[category]
             embed = ticket_embed(
                 interaction.client.user,
-                title=f"Ticket #{ticket.reference} — {CATEGORIES[category]}",
-                description="L'équipe de support te répondra prochainement.\n"
+                title=f"{option.emoji} Ticket #{ticket.reference} — {option.label}",
+                description=option.welcome + "\n\nL'équipe de support te répondra prochainement.\n"
                 "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
             )
             embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
@@ -666,6 +667,23 @@ class TicketService:
                 await session.save_transcript(ticket, interaction.user.id, content)
             await session.event(ticket, interaction.user.id, "transcript", staff=staff)
         return ticket, content
+
+    async def refresh_panel_menus(self, guild, view_factory):
+        """Refresh persisted menus while retaining the administrator's panel text."""
+        async with ticket_session(guild.id) as session:
+            panels = await session.panels()
+        for panel in panels:
+            channel = guild.get_channel(panel["channel_id"])
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            try:
+                message = await channel.fetch_message(panel["message_id"])
+                if message.author.id == guild.me.id:
+                    await message.edit(view=view_factory())
+            except discord.NotFound:
+                continue
+            except discord.HTTPException:
+                logger.warning("Could not refresh ticket panel guild=%s panel=%s", guild.id, panel["id"])
 
     async def normalize_channel_names(self, guild):
         async with ticket_session(guild.id) as session:

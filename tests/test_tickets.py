@@ -188,7 +188,8 @@ def test_private_overwrites_ignore_category_and_archive_restores_all_access(crea
     asyncio.run(scenario())
 
 
-def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_links():
+@pytest.mark.parametrize("category,label", [("report", "Plaintes"), ("shop", "Boutique"), ("rp", "Problème RP")])
+def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_links(category, label):
     async def scenario():
         env = destination()
         env.current.messages = [
@@ -211,10 +212,12 @@ def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_lin
                 )
             )
         )
-        content = await service.build_transcript(env.current, ticket(status="closed", close_reason="Résolu"), session)
+        content = await service.build_transcript(
+            env.current, ticket(category=category, status="closed", close_reason="Résolu"), session
+        )
         text = content.decode("utf-8")
         for expected in (
-            "Signalement",
+            label,
             "Résolu",
             "Personnel intervenu : 3",
             "Bonjour @everyone 🥇",
@@ -599,7 +602,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
             assert await other.next_number() == 2
         env.interaction.channel = env.panel
         env.interaction.user = env.creator
-        restarted = await manager.create(env.interaction, "shop")
+        restarted = await manager.create(env.interaction, "bot")
         assert restarted.id > opened.id and restarted.reference == "0001"
         assert env.channels[40].name == "ticket-0001"
 
@@ -828,6 +831,31 @@ def test_existing_default_channel_names_are_padded_but_custom_names_are_preserve
         await service.TicketService().normalize_channel_names(env.guild)
         assert env.current.name == "ticket-0001"
         env.panel.edit.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_startup_refreshes_existing_panel_menus_without_replacing_their_text(monkeypatch):
+    async def scenario():
+        env = destination()
+        panels = [
+            {"id": index, "channel_id": 20, "message_id": 200 + index} for index in range(3)
+        ]
+        session = SimpleNamespace(panels=AsyncMock(return_value=panels))
+        install_session(monkeypatch, session)
+        own = SimpleNamespace(author=env.guild.me, edit=AsyncMock())
+        foreign = SimpleNamespace(author=env.creator, edit=AsyncMock())
+        env.panel.fetch_message = AsyncMock(side_effect=[
+            own, foreign, discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing"),
+        ])
+        manager = service.TicketService()
+        await manager.refresh_panel_menus(env.guild, lambda: command.TicketPanel(manager))
+        own.edit.assert_awaited_once()
+        assert set(own.edit.await_args.kwargs) == {"view"}
+        options = own.edit.await_args.kwargs["view"].children[0].options
+        assert [option.label for option in options] == list(store.CATEGORIES.values())
+        assert all(option.emoji and option.description for option in options)
+        foreign.edit.assert_not_awaited()
 
     asyncio.run(scenario())
 

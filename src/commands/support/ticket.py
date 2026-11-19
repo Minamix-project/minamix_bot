@@ -14,7 +14,7 @@ from src.utils.ticket_controls import TicketCloseView
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
 from src.utils.ticket_setup import SetupContext, SetupHome
-from src.utils.tickets import CATEGORIES, TicketError, record_staff_message, ticket_session
+from src.utils.tickets import CATEGORY_OPTIONS, TicketError, category_label, record_staff_message, ticket_session
 
 
 class TicketPanel(discord.ui.View):
@@ -24,7 +24,10 @@ class TicketPanel(discord.ui.View):
         select = discord.ui.Select(
             custom_id="aurum:tickets:category:v1",
             placeholder="Choisis le type de demande…",
-            options=[discord.SelectOption(label=label, value=value) for value, label in CATEGORIES.items()],
+            options=[
+                discord.SelectOption(label=option.label, value=value, emoji=option.emoji, description=option.description)
+                for value, option in CATEGORY_OPTIONS.items()
+            ],
         )
         select.callback = self.choose
         self.add_item(select)
@@ -82,7 +85,10 @@ class Tickets(app_commands.Group):
         user="Membre pour lequel ouvrir le ticket (administration uniquement)",
         panel="Panneau à utiliser si plusieurs sont disponibles ; facultatif sinon",
     )
-    @app_commands.choices(reason=[app_commands.Choice(name=label, value=value) for value, label in CATEGORIES.items()])
+    @app_commands.choices(reason=[
+        app_commands.Choice(name=f"{option.emoji} {option.label}", value=value)
+        for value, option in CATEGORY_OPTIONS.items()
+    ])
     async def create(
         self, interaction: discord.Interaction, reason: str, user: discord.Member | None = None, panel: str | None = None
     ):
@@ -163,7 +169,7 @@ class Tickets(app_commands.Group):
             staff, _events = await session.history(ticket)
             embed = discord.Embed(title=f"Ticket #{ticket.reference}", color=discord.Color.blurple())
             embed.add_field(name="Créateur", value=f"<@{ticket.creator_id}> (`{ticket.creator_id}`)")
-            embed.add_field(name="Catégorie", value=CATEGORIES[ticket.category])
+            embed.add_field(name="Catégorie", value=category_label(ticket.category))
             embed.add_field(name="État", value="Ouvert" if ticket.status == "open" else "Fermé")
             embed.add_field(
                 name="Création", value=discord.utils.format_dt(ticket.created_at.replace(tzinfo=timezone.utc))
@@ -337,6 +343,7 @@ class TicketActivity(commands.Cog):
             guild = self.bot.get_guild(guild_id)
             if guild:
                 await self.service.normalize_channel_names(guild)
+                await self.service.refresh_panel_menus(guild, lambda: TicketPanel(self.service))
         self.normalized = True
 
     @commands.Cog.listener()

@@ -11,16 +11,49 @@ import aiomysql
 from src.utils.db import get_db_connection
 
 
-CATEGORIES = {
-    "general": "Support général",
-    "rp": "Problème RP",
-    "shop": "Boutique",
-    "report": "Signalement",
-    "application": "Candidature",
-    "staff": "Demande au staff",
+@dataclass(frozen=True)
+class TicketCategory:
+    label: str
+    emoji: str
+    description: str
+    welcome: str
+
+
+CATEGORY_OPTIONS = {
+    "partnerships": TicketCategory(
+        "Partenariats", "🔗", "Pour faire une demande de partenariats",
+        "Présente ton projet et précise le partenariat que tu souhaites proposer.",
+    ),
+    "character_validation": TicketCategory(
+        "Validation de Fiche", "✅", "Pour faire valider votre fiche de personnage ou autre",
+        "Envoie ta fiche de personnage ou le document à faire valider par le staff.",
+    ),
+    "report": TicketCategory(
+        "Plaintes", "⛔", "Pour porter plainte contre un autre membre du serveur",
+        "Décris la situation et indique le membre concerné. Ajoute des preuves si tu en as.",
+    ),
+    "general": TicketCategory(
+        "Besoin d'aide", "🆘", "Si vous avez besoin de l'aide du Staff",
+        "Explique-nous ce dont tu as besoin pour que le staff puisse t'aider.",
+    ),
+    "other": TicketCategory(
+        "Autres", "🤔", "Pour tout autre chose qui requiert l'attention du staff",
+        "Présente ta demande et donne les détails utiles au staff.",
+    ),
+    "bot": TicketCategory(
+        "Bot", "🤖", "Pour toute question ou tout problème concernant le bot",
+        "Décris ton problème ou ta question concernant le bot. "
+        "Précise la commande utilisée et joins une capture si possible.",
+    ),
 }
+CATEGORIES = {key: option.label for key, option in CATEGORY_OPTIONS.items()}
+LEGACY_CATEGORIES = {"rp": "Problème RP", "shop": "Boutique", "application": "Candidature", "staff": "Demande au staff"}
 PART_SIZE = 256 * 1024
 logger = logging.getLogger(__name__)
+
+
+def category_label(category):
+    return CATEGORIES.get(category, LEGACY_CATEGORIES.get(category, "Catégorie inconnue"))
 
 
 class TicketError(Exception):

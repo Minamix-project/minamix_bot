@@ -10,7 +10,7 @@ import pytest
 
 from src.commands.support import ticket as command
 from src.utils import ticket_service as service
-from src.utils.tickets import CATEGORIES, TicketError
+from src.utils.tickets import CATEGORIES, CATEGORY_OPTIONS, TicketError
 from test_ticket_setup import panel_record
 from test_tickets import destination, install_session, ticket
 
@@ -45,18 +45,20 @@ def test_creation_paths_share_numbering_welcome_ownership_and_audit(monkeypatch,
             env.interaction.message = None
         session = creation_session(monkeypatch, env)
         created = await service.TicketService().create(
-            env.interaction, "shop", direct=direct, user=env.creator if on_behalf else None,
+            env.interaction, "bot", direct=direct, user=env.creator if on_behalf else None,
         )
-        assert created.creator_id == env.creator.id and created.category == "shop"
+        assert created.creator_id == env.creator.id and created.category == "bot"
         assert env.channels[40].name == "ticket-0012"
-        session.active.assert_awaited_once_with(env.creator.id, "shop")
+        session.active.assert_awaited_once_with(env.creator.id, "bot")
         session.event.assert_awaited_once_with(
-            created, env.interaction.user.id, "created", CATEGORIES["shop"], staff=on_behalf,
+            created, env.interaction.user.id, "created", CATEGORIES["bot"], staff=on_behalf,
         )
         welcome = env.channels[40].send.await_args
         assert welcome.args == ("Bienvenue <@2> !",)
         assert welcome.kwargs["allowed_mentions"].to_dict()["users"] == [env.creator.id]
         assert welcome.kwargs["embed"].footer.text == "Aurum"
+        assert welcome.kwargs["embed"].title.startswith("🤖 Ticket #0012")
+        assert "Précise la commande utilisée" in welcome.kwargs["embed"].description
         assert welcome.kwargs["view"].is_persistent()
         assert env.channels[40].overwrites[env.creator].view_channel
     asyncio.run(scenario())
@@ -96,7 +98,7 @@ def test_direct_creation_uses_the_current_channels_panel_when_several_exist(monk
     async def scenario():
         env = destination()
         session = creation_session(monkeypatch, env, [panel_record(), panel_record(2, channel_id=10)])
-        created = await service.TicketService().create(env.interaction, "rp", direct=True)
+        created = await service.TicketService().create(env.interaction, "character_validation", direct=True)
         assert created.panel_id == 2
         session.panel_for_message.assert_not_awaited()
     asyncio.run(scenario())
@@ -108,9 +110,9 @@ def test_ambiguous_panels_require_a_choice_and_explicit_choice_is_respected(monk
         creation_session(monkeypatch, env, [panel_record(), panel_record(2)])
         manager = service.TicketService()
         with pytest.raises(TicketError, match="Plusieurs panneaux"):
-            await manager.create(env.interaction, "rp", direct=True)
+            await manager.create(env.interaction, "character_validation", direct=True)
         env.guild.create_text_channel.assert_not_awaited()
-        created = await manager.create(env.interaction, "rp", direct=True, panel_id=2)
+        created = await manager.create(env.interaction, "character_validation", direct=True, panel_id=2)
         assert created.panel_id == 2
     asyncio.run(scenario())
 
@@ -125,9 +127,9 @@ def test_absent_or_hidden_panels_are_not_available_for_direct_creation(monkeypat
         manager = service.TicketService()
         assert await manager.creation_panels(env.interaction) == []
         with pytest.raises(TicketError, match="Aucun panneau"):
-            await manager.create(env.interaction, "rp", direct=True)
+            await manager.create(env.interaction, "character_validation", direct=True)
         with pytest.raises(TicketError, match="plus disponible"):
-            await manager.create(env.interaction, "rp", direct=True, panel_id=1)
+            await manager.create(env.interaction, "character_validation", direct=True, panel_id=1)
         session.active.assert_not_awaited()
         env.guild.create_text_channel.assert_not_awaited()
     asyncio.run(scenario())
@@ -138,10 +140,10 @@ def test_creation_for_another_member_uses_that_members_category_limit(monkeypatc
         env = destination()
         env.interaction.user = env.admin
         session = creation_session(monkeypatch, env)
-        session.active.return_value = ticket(category="shop")
+        session.active.return_value = ticket(category="bot")
         with pytest.raises(TicketError, match="Ce membre a déjà.*catégorie"):
-            await service.TicketService().create(env.interaction, "shop", direct=True, user=env.creator)
-        session.active.assert_awaited_once_with(env.creator.id, "shop")
+            await service.TicketService().create(env.interaction, "bot", direct=True, user=env.creator)
+        session.active.assert_awaited_once_with(env.creator.id, "bot")
         env.guild.create_text_channel.assert_not_awaited()
     asyncio.run(scenario())
 
@@ -158,7 +160,7 @@ def test_create_command_has_french_reason_choices_and_private_response():
         options = {parameter.name: parameter for parameter in create.parameters}
         assert options["reason"].required
         assert [(choice.name, choice.value) for choice in options["reason"].choices] == [
-            (label, value) for value, label in CATEGORIES.items()
+            (f"{option.emoji} {option.label}", value) for value, option in CATEGORY_OPTIONS.items()
         ]
         assert not options["user"].required and not options["panel"].required
         await create.callback(group, env.interaction, "report", user=env.creator, panel="1")

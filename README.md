@@ -573,8 +573,11 @@ disables only its old message. Multiple panels can also share the same text chan
 The migration preserves existing published panels, roles, transcript destinations,
 message IDs and ticket numbers.
 
-Public panels offer General support, RP issue, Shop, Report, Application and Staff
-request categories in French. Their menus work after restarts and clear after every
+Public panels offer Partnerships (🔗), Character validation (✅), Complaints (⛔),
+Help (🆘), Other (🤔) and Bot (🤖) categories, with French labels and descriptions.
+Existing public menus are refreshed on startup while retaining their custom
+embeds. Historical ticket categories remain readable in information, logs and
+transcripts. Their menus work after restarts and clear after every
 selection, including rejected requests, so members can select the same category
 again. Each panel footer shows the bot's name and avatar, including its default avatar.
 
@@ -600,7 +603,8 @@ the relevant destinations. Enable the privileged Message Content and Server Memb
 intents. `@everyone` and integration-managed roles cannot be support roles.
 
 Opening a ticket mentions only its creator with a French welcome message. A
-French embed explains that support will reply shortly and offers a persistent
+French embed displays the category emoji and tailored opening guidance, explains
+that support will reply shortly and offers a persistent
 **Fermer le ticket** button, with the bot's name and avatar in its footer. Only
 the ticket creator can use that button, including after a bot restart. It opens
 a private **Es-tu sûr de vouloir fermer ce ticket ?** confirmation with a red
@@ -615,7 +619,7 @@ numbers are preserved by the migration; default channel names are padded on
 startup, while custom names remain unchanged.
 
 Each member can have one open ticket per help category per server. For example,
-one Shop ticket and one Report ticket may remain open together, but two Shop
+one Bot ticket and one Complaints ticket may remain open together, but two Bot
 tickets are rejected even when opened through different panels or commands.
 New channels use explicit permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
