@@ -35,7 +35,8 @@ async def register(bot):
                 await cursor.execute("SELECT COUNT(*), MAX(version), MAX(applied_at) FROM schema_migrations")
                 migration_count, last_version, last_applied_at = await cursor.fetchone()
                 await cursor.execute(
-                    "SELECT name, channel_id, transcript_channel_id FROM ticket_panels WHERE guild_id = %s ORDER BY id",
+                    "SELECT name, channel_id, transcript_channel_id, logs_channel_id "
+                    "FROM ticket_panels WHERE guild_id = %s ORDER BY id",
                     (interaction.guild_id,),
                 )
                 ticket_panels = await cursor.fetchall()
@@ -78,10 +79,11 @@ async def register(bot):
 
         if ticket_panels:
             lines = []
-            for name, panel_channel_id, transcript_channel_id in ticket_panels[:5]:
+            for name, panel_channel_id, transcript_channel_id, logs_channel_id in ticket_panels[:5]:
                 target = f"<#{transcript_channel_id}>" if transcript_channel_id else "base de données uniquement"
+                logs = f"<#{logs_channel_id}>" if logs_channel_id else "sans envoi"
                 lines.append(
-                    f"**{discord.utils.escape_markdown(name)}** : <#{panel_channel_id}> · Transcripts : {target}"
+                    f"**{discord.utils.escape_markdown(name)}** : <#{panel_channel_id}> · Transcripts : {target} · Logs : {logs}"
                 )
             if len(ticket_panels) > 5:
                 lines.append(f"… et {len(ticket_panels) - 5} autre(s).")

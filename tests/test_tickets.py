@@ -62,6 +62,7 @@ def destination():
     def channel(channel_id):
         value = Mock(spec=discord.TextChannel)
         value.id, value.guild, value.name, value.mention = channel_id, guild, f"ticket-{channel_id}", f"<#{channel_id}>"
+        value.topic = None
         value.overwrites = service.private_overwrites(guild, creator, [staff_role])
 
         def permissions_for(target):
@@ -96,6 +97,7 @@ def destination():
         value.messages = []
         value.permissions_for.side_effect = permissions_for
         value.edit, value.delete, value.send = AsyncMock(side_effect=edit), AsyncMock(side_effect=delete), AsyncMock()
+        value.send.return_value = SimpleNamespace(id=channel_id * 100)
         value.history = history
         channels[channel_id] = value
         return value
@@ -188,7 +190,8 @@ def test_private_overwrites_ignore_category_and_archive_restores_all_access(crea
     asyncio.run(scenario())
 
 
-def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_links():
+@pytest.mark.parametrize("category,label", [("report", "Plaintes"), ("shop", "Boutique"), ("rp", "Problème RP")])
+def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_links(category, label):
     async def scenario():
         env = destination()
         env.current.messages = [
@@ -211,10 +214,12 @@ def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_lin
                 )
             )
         )
-        content = await service.build_transcript(env.current, ticket(status="closed", close_reason="Résolu"), session)
+        content = await service.build_transcript(
+            env.current, ticket(category=category, status="closed", close_reason="Résolu"), session
+        )
         text = content.decode("utf-8")
         for expected in (
-            "Signalement",
+            label,
             "Résolu",
             "Personnel intervenu : 3",
             "Bonjour @everyone 🥇",
@@ -239,7 +244,19 @@ def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_lin
     asyncio.run(scenario())
 
 
+def category_record(key="report", **changes):
+    option = store.CATEGORY_OPTIONS[key]
+    return {"category_key": key, "name": option.label, "emoji": option.emoji,
+            "description": option.description, "welcome": option.welcome, "staff_role_ids": (), "version": 1, "claim_enabled": True, **changes}
+
+
 def install_session(monkeypatch, session, *, fail_commit=False):
+    if not hasattr(session, "category"):
+        session.category = AsyncMock(side_effect=lambda key, **kwargs: category_record(key, staff_role_ids=(5,)))
+    if not hasattr(session, "categories"):
+        session.categories = AsyncMock(return_value=[category_record(key) for key in store.CATEGORY_OPTIONS])
+    if not hasattr(session, "set_welcome_message"):
+        session.set_welcome_message = AsyncMock()
     @asynccontextmanager
     async def context(guild_id):
         assert guild_id == 1
@@ -333,6 +350,10 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
             assert group.default_permissions is None
             assert {item.name for item in group.commands} == {
                 "panel",
+                "create",
+                "categories",
+                "claim",
+                "release",
                 "add",
                 "remove",
                 "rename",
@@ -344,7 +365,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "reconcile",
                 "purge",
             }
-            for name in ("panel", "reconcile", "purge"):
+            for name in ("panel", "categories", "reconcile", "purge"):
                 check = group.get_command(name).checks[0]
                 assert not check(SimpleNamespace(user=SimpleNamespace(guild_permissions=discord.Permissions.none())))
                 assert check(
@@ -457,7 +478,10 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         env = destination()
         manager = service.TicketService()
         async with store.ticket_session(1) as session:
-            await session.save_panel(20, 200, 30, (5,), None)
+            await session.save_panel(20, 200, 30, None)
+            category = store.CategoryDraft.from_category(await session.category("report"))
+            category.staff_role_ids = (5,)
+            await session.save_category(category)
             with pytest.raises(store.TicketError, match="en cours"):
                 async with store.ticket_session(1):
                     pytest.fail("The second connection acquired the guild lock")
@@ -479,9 +503,9 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         assert welcome.kwargs["view"].is_persistent()
         async with store.ticket_session(999) as other:
             assert await other.get(opened.channel_id) is None
-            assert await other.active(2) is None
+            assert await other.active(2, "report") is None
         with pytest.raises(store.TicketError, match="déjà"):
-            await manager.create(env.interaction, "shop")
+            await manager.create(env.interaction, "report")
         env.interaction.channel, env.interaction.channel_id = env.channels[40], 40
         await store.record_staff_message(1, 40, env.outsider)
         await store.record_staff_message(1, 40, env.staff)
@@ -539,10 +563,10 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         with pytest.raises(aiomysql.IntegrityError):
             async with store.ticket_session(1) as session:
                 panel = (await session.panels())[0]
-                await session.create(41, 2, "general", panel)
+                await session.create(41, 2, "report", panel)
         # Rollback releases the named lock and preserves the original record.
         async with store.ticket_session(1) as session:
-            assert (await session.active(2)).id == reopened.id
+            assert (await session.active(2, "report")).id == reopened.id
             assert await session.get(41) is None
             audits = await session.rows("SELECT action FROM admin_audit WHERE guild_id = 1 AND action LIKE 'ticket.%'")
             assert any(f"#{opened.reference}" in row["action"] for row in audits)
@@ -550,7 +574,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         # Purge all ticket data for one guild while preserving another guild and its counter.
         async with store.ticket_session(999) as other:
             other_panel = {"staff_role_ids": (5,), "transcript_channel_id": None}
-            await other.save_panel(90, 900, 91, (5,), None)
+            await other.save_panel(90, 900, 91, None)
             await other.create(92, 2, "general", other_panel)
             foreign = await other.get(92)
             await other.save_transcript(foreign, 3, b"Other guild transcript")
@@ -598,7 +622,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
             assert await other.next_number() == 2
         env.interaction.channel = env.panel
         env.interaction.user = env.creator
-        restarted = await manager.create(env.interaction, "shop")
+        restarted = await manager.create(env.interaction, "bot")
         assert restarted.id > opened.id and restarted.reference == "0001"
         assert env.channels[40].name == "ticket-0001"
 
@@ -609,9 +633,10 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
     async def scenario():
         env = destination()
         env.interaction.user = env.admin
-        draft = store.PanelDraft(id=1, staff_role_ids=(5,), category_id=30, channel_id=20, version=1)
+        draft = store.PanelDraft(id=1, category_id=30, channel_id=20, version=1)
         session = SimpleNamespace(
             panel=AsyncMock(return_value={"id": 1, "channel_id": 20, "message_id": 200, "version": 1}),
+            for_panel=AsyncMock(return_value=[]),
             save_panel=AsyncMock(return_value=1),
             execute=AsyncMock(),
             get=AsyncMock(return_value=None),
@@ -627,15 +652,15 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
             20,
             200,
             30,
-            (5,),
             None,
+            logs_channel_id=None,
             panel_id=1,
             name="Support",
             title=service.DEFAULT_PANEL_TITLE,
             text=service.DEFAULT_PANEL_TEXT,
         )
-        env.staff_role.is_default.return_value = True
-        with pytest.raises(store.TicketError, match="dédiés"):
+        draft.category_id = 999
+        with pytest.raises(store.TicketError, match="catégorie"):
             await service.TicketService().panel(env.interaction, draft, None)
 
     asyncio.run(scenario())
@@ -717,7 +742,6 @@ def test_custom_panel_title_text_and_bot_footer(monkeypatch):
             text=r"Bonjour !\nComment peut-on t'aider ?",
             category_id=30,
             channel_id=20,
-            staff_role_ids=(5,),
         )
         await service.TicketService().panel(env.interaction, draft, None)
         embed = env.panel.send.await_args.kwargs["embed"]
@@ -829,6 +853,31 @@ def test_existing_default_channel_names_are_padded_but_custom_names_are_preserve
     asyncio.run(scenario())
 
 
+def test_startup_refreshes_existing_panel_menus_without_replacing_their_text(monkeypatch):
+    async def scenario():
+        env = destination()
+        panels = [
+            {"id": index, "channel_id": 20, "message_id": 200 + index} for index in range(3)
+        ]
+        session = SimpleNamespace(panels=AsyncMock(return_value=panels))
+        install_session(monkeypatch, session)
+        own = SimpleNamespace(author=env.guild.me, edit=AsyncMock())
+        foreign = SimpleNamespace(author=env.creator, edit=AsyncMock())
+        env.panel.fetch_message = AsyncMock(side_effect=[
+            own, foreign, discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing"),
+        ])
+        manager = service.TicketService()
+        await manager.refresh_panel_menus(env.guild, lambda: command.TicketPanel(manager))
+        own.edit.assert_awaited_once()
+        assert set(own.edit.await_args.kwargs) == {"view"}
+        options = own.edit.await_args.kwargs["view"].children[0].options
+        assert [option.label for option in options] == list(store.CATEGORIES.values())
+        assert all(option.emoji and option.description for option in options)
+        foreign.edit.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
 def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequences(monkeypatch, tmp_path):
     import os
     from pathlib import Path
@@ -886,10 +935,10 @@ def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequen
                     await cursor.execute("SELECT guild_id, next_number FROM ticket_sequences ORDER BY guild_id")
                     assert list(await cursor.fetchall()) == [(1, 23), (2, 43)]
                     await cursor.execute(
-                        "SELECT id, staff_role_ids, transcript_channel_id, channel_id, message_id FROM ticket_panels WHERE guild_id = 1"
+                        "SELECT id, transcript_channel_id, channel_id, message_id FROM ticket_panels WHERE guild_id = 1"
                     )
                     panel = await cursor.fetchone()
-                    assert json.loads(panel[1]) == [5] and panel[2:] == (60, 20, 200)
+                    assert panel[1:] == (60, 20, 200)
                     await cursor.execute(
                         "SELECT panel_id, staff_role_ids, transcript_channel_id FROM tickets WHERE id = 11"
                     )
@@ -899,6 +948,10 @@ def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequen
                         "SELECT value FROM guild_config WHERE guild_id = 1 AND config_key = 'logs_channel'"
                     )
                     assert (await cursor.fetchone())[0] == "50"
+                    await cursor.execute("SELECT logs_channel_id FROM ticket_panels WHERE guild_id = 1")
+                    assert (await cursor.fetchone())[0] is None
+                    await cursor.execute("SELECT logs_channel_id FROM tickets WHERE id = 11")
+                    assert (await cursor.fetchone())[0] is None
             finally:
                 db.close()
         finally:
@@ -927,7 +980,7 @@ def test_stale_panel_editor_is_rejected_before_publishing(monkeypatch):
         env.interaction.user = env.admin
         session = SimpleNamespace(panel=AsyncMock(return_value={"id": 1, "version": 2}))
         install_session(monkeypatch, session)
-        draft = store.PanelDraft(id=1, staff_role_ids=(5,), category_id=30, channel_id=20, version=1)
+        draft = store.PanelDraft(id=1, category_id=30, channel_id=20, version=1)
         with pytest.raises(store.TicketError, match="modifié ou supprimé"):
             await service.TicketService().panel(env.interaction, draft, None)
         env.panel.send.assert_not_awaited()
@@ -936,20 +989,13 @@ def test_stale_panel_editor_is_rejected_before_publishing(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_general_action_logs_and_transcript_files_have_separate_destinations(monkeypatch):
+def test_ticket_action_logs_and_transcript_files_have_separate_destinations():
     async def scenario():
         env = destination()
-        cursor = AsyncMock()
-        cursor.fetchone.return_value = ("10",)
-        context = AsyncMock()
-        context.__aenter__.return_value = cursor
-        db = Mock()
-        db.cursor.return_value = context
-        monkeypatch.setattr(service, "get_db_connection", AsyncMock(return_value=db))
-        closed = ticket(transcript_channel_id=20, closed_by=2, close_reason="Résolu")
+        closed = ticket(logs_channel_id=10, transcript_channel_id=20, closed_by=2, close_reason="Résolu")
         manager = service.TicketService()
         await manager.log_action(env.guild, closed, "closed", 2)
-        assert "'logs_channel'" in cursor.execute.await_args.args[0]
+        env.current.send.assert_awaited_once()
         assert "file" not in env.current.send.await_args.kwargs
         assert await manager.send_transcript(env.guild, closed, b"private messages") is None
         assert env.panel.send.await_args.kwargs["file"].filename == "ticket-0001.txt"
@@ -979,7 +1025,6 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
         )
 
     monkeypatch.setattr(store, "get_db_connection", connect)
-    monkeypatch.setattr(service, "get_db_connection", connect)
 
     async def scenario():
         db = await connect()
@@ -992,15 +1037,19 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             db.close()
         async with store.ticket_session(1) as session:
             first_id = await session.save_panel(
-                20, 200, 30, (5, 6), 60, name="Support RP", title="RP", text="Explique ton problème."
+                20, 200, 30, 60, logs_channel_id=70,
+                name="Support RP", title="RP", text="Explique ton problème."
             )
-            second_id = await session.save_panel(20, 201, 31, (7,), 61, name="Boutique")
+            second_id = await session.save_panel(20, 201, 31, 61, logs_channel_id=71, name="Boutique")
             first = await session.panel_for_message(20, 200)
             second = await session.panel_for_message(20, 201)
             assert first["id"] == first_id and second["id"] == second_id
-            await session.create(40, 2, "rp", first)
+            assert first["logs_channel_id"] == 70 and second["logs_channel_id"] == 71
+            await session.create(40, 2, "rp", first, staff_role_ids=(5, 6))
             old_ticket = await session.get(40)
-            await session.save_panel(21, 210, 32, (8,), 62, panel_id=first_id, name="Support RP modifié")
+            await session.save_panel(
+                21, 210, 32, 62, logs_channel_id=72, panel_id=first_id, name="Support RP modifié"
+            )
         # A restart resolves each panel by its own message and retains optimistic edit versions.
         async with store.ticket_session(1) as session:
             assert await session.panel_for_message(20, 200) is None
@@ -1009,8 +1058,32 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             assert (await session.panel(first_id))["version"] == 2
             retained = await session.get(40)
             assert retained.staff_role_ids == (5, 6) and retained.transcript_channel_id == 60
+            assert retained.logs_channel_id == 70
+            assert (await session.panel(first_id))["logs_channel_id"] == 72
             assert retained.panel_id == first_id
             assert len(await session.panels()) == 2
+
+        # The limit follows the help category across panels, including at SQL level.
+        async with store.ticket_session(1) as session:
+            second = await session.panel(second_id)
+            await session.create(41, 2, "shop", second)
+            assert (await session.active(2, "rp")).id == old_ticket.id
+            assert (await session.active(2, "shop")).channel_id == 41
+        with pytest.raises(aiomysql.IntegrityError):
+            async with store.ticket_session(1) as session:
+                await session.create(42, 2, "rp", await session.panel(second_id))
+        async with store.ticket_session(1) as session:
+            retained = await session.get(40)
+            await session.close(retained, 3, "Résolu", [])
+            await session.create(42, 2, "rp", await session.panel(second_id))
+        with pytest.raises(aiomysql.IntegrityError):
+            async with store.ticket_session(1) as session:
+                await session.reopen(retained)
+        async with store.ticket_session(1) as session:
+            await session.close(await session.get(42), 3, "Résolu", [])
+            await session.reopen(retained)
+            assert (await session.active(2, "rp")).id == old_ticket.id
+            assert (await session.active(2, "shop")).channel_id == 41
         async with store.ticket_session(999) as foreign:
             assert await foreign.panel(first_id) is None
             assert await foreign.panel_for_message(20, 201) is None
@@ -1022,5 +1095,6 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             retained = await session.get(40)
             assert retained.id == old_ticket.id and retained.panel_id is None
             assert retained.staff_role_ids == (5, 6) and retained.transcript_channel_id == 60
+            assert retained.logs_channel_id == 70
 
     asyncio.run(scenario())

@@ -545,16 +545,18 @@ and command names are in English. Open the private setup interface with no param
 ```
 
 Manage Server or Administrator is required. Choose **Créer un panneau** or
-**Gérer les panneaux**. The creation/editor wizard has five steps:
+**Gérer les panneaux**. Use **Gérer les catégories** or `/ticket categories` for
+shared support-category settings. The panel creation/editor wizard has five steps:
 
 1. **Nom et message**: a modal sets the manager name (1–80 characters), public
    title (up to 256 characters), and multiline text (up to 4,000 characters).
    Blank title/text fields use the default panel message.
-2. **Rôles de support**: select 1–10 dedicated roles through Discord's role picker.
-3. **Catégorie des tickets**: select the category for private ticket channels.
-4. **Salon des transcripts**: optionally select a private text channel for the
+2. **Catégorie Discord des tickets**: select the category for private ticket channels.
+3. **Salon des transcripts**: optionally select a private text channel for the
    transcript files, or choose **Sans salon de transcripts**. Database storage
    remains enabled regardless of this choice.
+4. **Salon des logs de tickets**: optionally select a text channel for ticket
+   action summaries, or choose **Sans envoi de logs**.
 5. **Envoi du panneau**: select the destination text channel, then press
    **Enregistrer et envoyer**.
 
@@ -568,18 +570,24 @@ The manager lists panels by ID and name, paginated in groups of 25. Each panel c
 be edited, sent/moved, or removed independently. Removal requires confirmation,
 disables that panel's public menu and retains its existing tickets. Moving a panel
 disables only its old message. Multiple panels can also share the same text channel.
-The migration preserves existing published panels, roles, transcript destinations,
+The migration preserves existing published panels, transcript destinations,
 message IDs and ticket numbers.
 
-Public panels offer General support, RP issue, Shop, Report, Application and Staff
-request categories in French. Their menus work after restarts and clear after every
+Public panels offer Partnerships (🔗), Character validation (✅), Complaints (⛔),
+Help (🆘), Other (🤔) and Bot (🤖) categories, with French labels and descriptions.
+Existing public menus are refreshed on startup while retaining their custom
+embeds. Historical ticket categories remain readable in information, logs and
+transcripts. Their menus work after restarts and clear after every
 selection, including rejected requests, so members can select the same category
 again. Each panel footer shows the bot's name and avatar, including its default avatar.
 
-**Transcripts and general logs are separate.** The private transcript channel is
-selected per panel in the wizard. Ticket action summaries use the existing general
-log destination configured with `/setlogs`; they do not contain transcript files or
-message bodies. Setting a transcript destination does not change the general logs.
+**Transcripts, ticket logs and general logs have separate configuration.** The
+private transcript channel and optional ticket action log channel are selected
+independently per panel in the wizard. Ticket action summaries only use their
+configured destination, with no fallback to `/setlogs`; they do not contain
+transcript files or message bodies. Without a ticket log destination, no action
+summary is sent to Discord, while the database audit history remains available.
+Existing panels start without a ticket log channel; edit them to configure one.
 Ticket journals use the same moderation layout: action icon and color, named fields
 for the channel, ticket, category, creator and actor, a timestamp, the creator's
 avatar and the bot footer. Member changes also identify the affected member.
@@ -595,7 +603,8 @@ the relevant destinations. Enable the privileged Message Content and Server Memb
 intents. `@everyone` and integration-managed roles cannot be support roles.
 
 Opening a ticket mentions only its creator with a French welcome message. A
-French embed explains that support will reply shortly and offers a persistent
+French embed displays the category emoji and tailored opening guidance, explains
+that support will reply shortly and offers a persistent
 **Fermer le ticket** button, with the bot's name and avatar in its footer. Only
 the ticket creator can use that button, including after a bot restart. It opens
 a private **Es-tu sûr de vouloir fermer ce ticket ?** confirmation with a red
@@ -609,19 +618,100 @@ Ticket numbers are independent per server and channel names use `ticket-0001`,
 numbers are preserved by the migration; default channel names are padded on
 startup, while custom names remain unchanged.
 
-Each member can have one open ticket per server. New channels use explicit
-permissions for the creator, all configured support roles and the bot; other
+Each member can have one open ticket per help category per server. For example,
+one Bot ticket and one Complaints ticket may remain open together, but two Bot
+tickets are rejected even when opened through different panels or commands.
+New channels use explicit permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
-channels. Existing tickets retain the support roles and transcript destination configured
-when they were created. Category/role removal requires panel reconfiguration.
+channels. Support roles belong to the selected help category, independently of
+which panel created the ticket. The six default categories are persisted per
+guild with **no support roles**; administrators configure them themselves with
+`/ticket categories`. Panels no longer store or edit support roles. With no
+roles configured, a new ticket is accessible to its creator, the bot and Discord
+administrators.
+
+The private category editor changes the name (100 characters), Unicode or
+accessible custom emoji, menu description (100 characters), opening message
+(2,000 characters), and zero to ten dedicated support roles. Unsaved drafts are
+discarded when switching categories. Saved edits use version checks to prevent
+concurrent overwrites. `/ticket create` autocompletion uses the current names.
+Category keys remain stable when renamed, so the per-category ticket limit is
+preserved.
+
+**Prise en charge** is enabled by default for every existing and new category.
+The category editor can toggle it before saving. Members holding one of that
+category's support roles can use **Prendre en charge** or `/ticket claim` in an
+open ticket. Administrator permissions alone do not grant claim eligibility.
+Only one person can claim a ticket; concurrent requests are serialized and
+guarded in MySQL. Claiming does not modify channel access or other staff powers.
+
+The opening embed shows the responsible member and claim time. The channel name
+keeps its number first, for example `ticket-0001-🟢-alice`. Only the responsible
+member can use **Libérer le ticket** or `/ticket release`, including after a
+restart; there is no administrator override or reassignment action. Release
+restores the original channel name. Renaming a claimed ticket retains its
+marker and updates the name that will be restored on release. Claim history is
+included in action logs, the administrative audit and transcripts.
+
+Disabling claiming prevents new claims and hides the claim button. An existing
+responsible member keeps their assignment and can still release it while they
+have access, including in a closed ticket. Closing and reopening keep assignment
+history and ownership. Previously created tickets receive the controls during
+startup category synchronization. If an opening message was deleted, an explicit
+claim or release recreates its information and controls without pinging members.
+
+Use **Créer une catégorie** to draft a new category with its own generated key,
+texts, emoji and optional roles, then press **Créer** to publish it. Up to 25
+categories can be active per guild. The limit is checked again when saving.
+Choose an existing category and press **Supprimer** for a private confirmation.
+Confirming removes it from every public menu and from `/ticket create`, while
+existing tickets retain their category name, permissions, transcripts and normal
+management commands. Deleted categories stay archived internally, so defaults
+are not recreated on restart and names remain available in historical logs.
+If every category is deleted, public menus are disabled until another is created.
+
+Saving a category updates every public panel menu and all its existing ticket
+channels, including tickets whose panel was deleted. It changes channel topics,
+opening embeds and support permissions while preserving ticket numbers and
+explicit creator/guest access. Closed tickets remain private and read-only;
+their saved reopening permissions receive the same role changes. Initial
+messages are tracked by ID; older ones are recovered among the first 50 messages
+when possible. Deleted opening messages are left deleted. Historical transcript
+files remain unchanged, while new exports and action logs use the current name.
+
+The bot checks affected channels before editing and restores completed Discord
+changes if persistence fails. Deleted channels are skipped. Startup synchronizes
+pending category versions and refreshes public menus. Transcript and ticket log
+destinations retain their creation-time values. Existing role snapshots are
+replaced by category roles during synchronization; former panel roles are not
+copied into the empty category defaults.
+
+Use `/ticket create reason:<choice> [user] [panel]` to open a ticket directly.
+The required `reason` dropdown contains the same six French categories as the
+public panel. `user` accepts a server member and is restricted to Administrator
+or Manage Server; the selected member owns the ticket, receives its welcome
+mention and close button, and is subject to the category limit. The administrator
+who runs the command is recorded as the actor. Bots and foreign members are
+rejected. Without `user`, the requesting member owns the ticket.
+
+The optional `panel` autocomplete lists only panels in channels the requesting
+member can see. If omitted, the command uses the only available panel in the
+current channel, or the only available panel in the server. Ambiguous choices
+require selecting `panel`. Each ticket uses that panel's channel category,
+transcripts and ticket log destination; support roles come from the chosen help
+category.
 
 | Command | Access and behavior |
 | --- | --- |
+| `/ticket categories` | Administration; edit shared categories and synchronize their existing tickets |
+| `/ticket create <reason> [user] [panel]` | Everyone; create directly, with `user` restricted to administration |
 | `/ticket add <user>` | Support role or administration; grant access to another member |
 | `/ticket remove <user>` | Support role or administration; deny that member access |
 | `/ticket rename <name>` | Support role or administration; rename the current ticket |
 | `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
 | `/ticket reopen` | Support role or administration; restore previous access permissions |
+| `/ticket claim` | Category support role; exclusively claim an open ticket without changing access |
+| `/ticket release` | Current responsible member only; release the ticket and restore its name |
 | `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
 | `/ticket info` | Creator while open, or support; category, creator, dates, staff and closure details |
 | `/ticket link <user>` | Support role or administration; associate a subject without granting access |
@@ -645,7 +735,8 @@ access read-only. Staff-role access and the bot's permissions are retained; Disc
 administrators still bypass overwrites. The bot saves the transcript and optionally
 uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
 remains available through `transcript`. Reopening by staff restores the saved permissions for the creator and previously added members;
-a second open ticket for the same creator prevents reopening. MySQL transactions,
+a second open ticket for the same creator and help category prevents reopening.
+Tickets in other help categories do not prevent reopening. MySQL transactions,
 a per-server lock and a unique constraint prevent duplicate opens. On ordinary
 Discord or database failures, completed channel changes are undone. Discord and
 MySQL cannot commit atomically: a process termination between their operations

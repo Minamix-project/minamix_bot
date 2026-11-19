@@ -12,6 +12,7 @@ ADMIN_HELP_CATEGORIES = frozenset({"rp_management", "admin_economy", "moderation
 
 _GENERAL = (
     "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
+    "`/ticket create <reason> [panel]` — Ouvrir un ticket sans passer par le panneau (un par catégorie)\n"
     "Pour fermer ton ticket, utilise le bouton **Fermer le ticket**, puis confirme.\n"
     "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
     "`/afk` — Signaler une absence et sa durée\n"
@@ -74,20 +75,25 @@ _MODERATION = (
 
 _ADMIN_TICKETS = (
     "`/ticket panel` — Créer, modifier, déplacer ou supprimer des panneaux avec l'assistant\n"
+    "`/ticket categories` — Créer, supprimer et personnaliser les catégories, leurs textes, emojis et rôles\n"
+    "`/ticket create <reason> [user] [panel]` — Créer un ticket ; `user` réservé à l'administration\n"
     "`/ticket add <user>` — Ajouter un membre au ticket\n"
     "`/ticket remove <user>` — Retirer un membre du ticket\n"
     "`/ticket rename <name>` — Renommer le salon du ticket\n"
     "`/ticket close <reason>` — Fermer le ticket et sauvegarder son historique\n"
     "`/ticket reopen` — Rouvrir le ticket et restaurer ses accès\n"
+    "`/ticket claim` — Prendre en charge un ticket libre avec un rôle de sa catégorie\n"
+    "`/ticket release` — Libérer le ticket dont tu es responsable\n"
     "`/ticket transcript` — Télécharger l'historique du ticket\n"
     "`/ticket info` — Voir le créateur, la catégorie, les dates et les interventions\n"
     "`/ticket link <user>` — Lier un utilisateur concerné sans lui donner accès\n"
     "`/ticket reconcile <channel_id> <reason>` — Régulariser un ticket dont le salon a été supprimé\n"
     "`/ticket purge` — Supprimer les tickets et leurs données, puis repartir à 0001 (confirmation)\n\n"
-    "**Accès :** panneaux, régularisation et purge réservés à l'administration. "
-    "La gestion des tickets est aussi ouverte aux rôles de support configurés.\n"
+    "**Accès :** panneaux, catégories, régularisation et purge réservés à l'administration. "
+    "La gestion des tickets est aussi ouverte aux rôles de support configurés par catégorie.\n"
     "Le bouton de fermeture avec confirmation est réservé au créateur ; le personnel utilise `/ticket close`.\n"
-    "Les transcripts ont un salon dédié ; les logs d'actions utilisent `/setlogs`. "
+    "Le claim ne change aucun accès. Un seul responsable, qui est le seul à pouvoir libérer le ticket.\n"
+    "Les salons des transcripts et des logs de tickets se choisissent séparément dans chaque panneau. "
     "Consulte `/audit commande:ticket` pour l'historique administratif."
 )
 

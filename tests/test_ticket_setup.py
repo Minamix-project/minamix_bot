@@ -47,6 +47,7 @@ def panel_record(panel_id=1, **changes):
         "category_id": 30,
         "channel_id": 20,
         "transcript_channel_id": None,
+        "logs_channel_id": None,
         "version": 1,
         **changes,
     }
@@ -78,13 +79,13 @@ def test_panel_command_has_no_parameters_and_opens_private_setup():
             sent = interaction.response.send_message.await_args.kwargs
             assert isinstance(sent["view"], setup.SetupHome)
             assert sent["ephemeral"]
-            assert {item.label for item in sent["view"].children} == {"Créer un panneau", "Gérer les panneaux"}
+            assert {item.label for item in sent["view"].children} == {"Créer un panneau", "Gérer les panneaux", "Gérer les catégories"}
             assert sent["embed"].footer.text == "Aurum" and sent["embed"].footer.icon_url
 
     asyncio.run(scenario())
 
 
-def test_wizard_guides_all_five_steps_and_only_publishes_at_the_end(monkeypatch):
+def test_wizard_guides_five_destination_steps_without_support_role_selection(monkeypatch):
     async def scenario():
         env, context = session(monkeypatch)
         wizard = setup.PanelWizard(context)
@@ -96,35 +97,29 @@ def test_wizard_guides_all_five_steps_and_only_publishes_at_the_end(monkeypatch)
         modal.title_input._value = "Un souci RP ?"
         modal.text_input._value = "Explique ta demande."
         await modal.on_submit(env.interaction)
-        assert wizard.draft.name == "Aide RP"
         await wizard.advance(env.interaction)
-        assert wizard.step == 1 and isinstance(wizard.children[0], discord.ui.RoleSelect)
-        with pytest.raises(TicketError, match="rôle"):
+        assert wizard.step == 1 and isinstance(wizard.children[0], discord.ui.ChannelSelect)
+        with pytest.raises(TicketError, match="catégorie"):
             await wizard.advance(env.interaction)
-        env.interaction.data = {"values": ["5"]}
-        await wizard.select_roles(env.interaction)
-        await wizard.advance(env.interaction)
-        assert wizard.step == 2 and wizard.children[0].channel_types == [discord.ChannelType.category]
         env.interaction.data = {"values": ["30"]}
         await wizard.select_channel(env.interaction)
         await wizard.advance(env.interaction)
-        assert wizard.step == 3
+        assert wizard.step == 2
         await wizard.clear_transcripts(env.interaction)
-        await wizard.back(env.interaction)
-        assert wizard.step == 2 and wizard.draft.category_id == 30
         await wizard.advance(env.interaction)
+        assert wizard.step == 3
+        env.interaction.data = {"values": ["20"]}
+        await wizard.select_channel(env.interaction)
         await wizard.advance(env.interaction)
         assert wizard.step == 4
         context.service.panel.assert_not_awaited()
-        env.interaction.data = {"values": ["20"]}
         await wizard.select_channel(env.interaction)
         await wizard.advance(env.interaction)
         context.service.panel.assert_awaited_once()
         draft = context.service.panel.await_args.args[1]
-        assert draft.staff_role_ids == (5,) and draft.category_id == 30 and draft.channel_id == 20
-        assert draft.transcript_channel_id is None
+        assert draft.category_id == 30 and draft.channel_id == 20 and draft.logs_channel_id == 20
+        assert not hasattr(draft, "staff_role_ids")
         assert wizard.is_finished()
-
     asyncio.run(scenario())
 
 
@@ -198,10 +193,11 @@ def test_manager_paginates_and_requires_confirmation_to_delete_only_selected_pan
 def test_transcripts_step_is_optional_and_keeps_it_distinct_from_general_logs(monkeypatch):
     async def scenario():
         env, context = session(monkeypatch)
-        wizard = setup.PanelWizard(context, PanelDraft(transcript_channel_id=10), step=3)
+        wizard = setup.PanelWizard(context, PanelDraft(transcript_channel_id=10), step=2)
         await wizard.render(env.interaction)
         embed = env.interaction.response.edit_message.await_args.kwargs["embed"]
-        assert "/setlogs" in embed.description
+        assert "transcripts restent sauvegardés" in embed.description
+        assert "/setlogs" not in embed.description
         await wizard.clear_transcripts(env.interaction)
         assert wizard.draft.transcript_channel_id is None
         assert wizard.children[0].min_values == 0
@@ -211,4 +207,27 @@ def test_transcripts_step_is_optional_and_keeps_it_distinct_from_general_logs(mo
         with pytest.raises(TicketError, match="privé"):
             await wizard.select_channel(env.interaction)
 
+    asyncio.run(scenario())
+
+
+def test_ticket_logs_step_is_optional_and_independent_from_transcripts(monkeypatch):
+    async def scenario():
+        env, context = session(monkeypatch)
+        draft = PanelDraft(transcript_channel_id=10, logs_channel_id=20)
+        wizard = setup.PanelWizard(context, draft, step=3)
+        await wizard.render(env.interaction)
+        assert "Étape 4/5" in env.interaction.response.edit_message.await_args.kwargs["embed"].title
+        assert wizard.children[0].min_values == 0
+        await wizard.clear_logs(env.interaction)
+        assert draft.logs_channel_id is None and draft.transcript_channel_id == 10
+        env.interaction.data = {"values": ["20"]}
+        await wizard.select_channel(env.interaction)
+        assert draft.logs_channel_id == 20
+        await wizard.back(env.interaction)
+        assert wizard.step == 2 and draft.logs_channel_id == 20
+        await wizard.advance(env.interaction)
+        await wizard.advance(env.interaction)
+        assert wizard.step == 4
+        assert draft.logs_channel_id == 20 and draft.transcript_channel_id == 10
+        context.service.panel.assert_not_awaited()
     asyncio.run(scenario())

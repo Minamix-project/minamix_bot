@@ -1,4 +1,4 @@
-"""Persistent creator-only ticket close button and private confirmation."""
+"""Persistent ticket claiming and creator-only closing controls."""
 
 import discord
 
@@ -14,9 +14,16 @@ def ticket_embed(bot_user, *, title, description):
 
 
 class TicketCloseView(discord.ui.View):
-    def __init__(self, service):
+    def __init__(self, service, ticket=None):
         super().__init__(timeout=None)
         self.service = service
+        if ticket is not None:
+            self.close.disabled = ticket.status != "open"
+            self.claim.disabled = ticket.status != "open" or ticket.claimed_by is not None
+            if not ticket.claim_enabled:
+                self.remove_item(self.claim)
+            if ticket.claimed_by is None:
+                self.remove_item(self.release)
 
     async def interaction_check(self, interaction):
         if interaction.guild_id in GUILD_IDS and isinstance(interaction.user, discord.Member):
@@ -38,8 +45,42 @@ class TicketCloseView(discord.ui.View):
             embed=embed, view=view, ephemeral=True, wait=True, allowed_mentions=discord.AllowedMentions.none()
         )
 
+    @discord.ui.button(
+        label="Prendre en charge", emoji="🟢", style=discord.ButtonStyle.success, custom_id="aurum:tickets:claim:v1",
+    )
+    async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.assignment(interaction, release=False)
+
+    @discord.ui.button(
+        label="Libérer le ticket", emoji="↩️", style=discord.ButtonStyle.secondary, custom_id="aurum:tickets:release:v1",
+    )
+    async def release(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.assignment(interaction, release=True)
+
+    async def assignment(self, interaction, *, release):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.service.assign(interaction, release=release)
+        text = "Tu as libéré le ticket." if release else "Tu prends maintenant ce ticket en charge."
+        await interaction.followup.send(f"✅ {text}", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
     async def on_error(self, interaction, error, item):
         await send_error(interaction, error)
+
+
+def previous_ticket_controls(service, message):
+    """Restore the message's previous button layout with live persistent callbacks."""
+    buttons = {
+        item.custom_id: item.disabled
+        for row in getattr(message, "components", ()) for item in row.children
+        if isinstance(item, discord.Button)
+    }
+    view = TicketCloseView(service)
+    for item in list(view.children):
+        if item.custom_id not in buttons:
+            view.remove_item(item)
+        else:
+            item.disabled = buttons[item.custom_id]
+    return view
 
 
 class TicketCloseConfirmation(ExpiringView):
