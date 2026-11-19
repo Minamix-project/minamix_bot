@@ -1,4 +1,4 @@
-"""Panel edits synchronize existing ticket access without breaking archive privacy."""
+"""Category edits synchronize all associated tickets without breaking archive privacy."""
 
 import asyncio
 import json
@@ -11,9 +11,9 @@ import pytest
 
 from src.utils import ticket_service as service
 from src.utils import tickets as store
-from src.utils.tickets import PanelDraft, TicketError
-from test_ticket_setup import panel_record
-from test_tickets import destination, install_session, ticket
+from src.utils.tickets import CategoryDraft, TicketError
+from src.commands.support.ticket import TicketPanel
+from test_tickets import category_record, destination, install_session, ticket
 
 
 def synchronization(monkeypatch, *, closed=False, fail_commit=False):
@@ -34,21 +34,24 @@ def synchronization(monkeypatch, *, closed=False, fail_commit=False):
         env.current.overwrites = service.archive_overwrites(
             env.guild, env.current.overwrites, current.staff_role_ids, creator_id=current.creator_id,
         )
-    # The panel may already have been edited before this fix was deployed.
-    record = panel_record(staff_role_ids=(6,), message_id=200)
-    draft = PanelDraft.from_panel(record)
+    record = category_record(staff_role_ids=(5,))
+    draft = CategoryDraft.from_category({**record, "staff_role_ids": (6,)})
     message = SimpleNamespace(id=200, author=env.guild.me, embeds=[], edit=AsyncMock())
-    env.panel.fetch_message = AsyncMock(return_value=message)
+    current.welcome_message_id = 200
+    env.current.fetch_message = AsyncMock(return_value=message)
     session = SimpleNamespace(
-        panel=AsyncMock(return_value=record), for_panel=AsyncMock(return_value=[current]),
-        get=AsyncMock(return_value=None), update_staff=AsyncMock(), save_panel=AsyncMock(return_value=1), execute=AsyncMock(),
+        category=AsyncMock(side_effect=lambda key: {**record, "name": draft.name, "emoji": draft.emoji,
+            "description": draft.description, "welcome": draft.welcome, "staff_role_ids": draft.staff_role_ids,
+            "version": 2 if session.save_category.await_count else 1}),
+        categories=AsyncMock(return_value=[record]), for_category=AsyncMock(return_value=[current]),
+        panels=AsyncMock(return_value=[]), update_category=AsyncMock(), save_category=AsyncMock(), execute=AsyncMock(),
     )
     install_session(monkeypatch, session, fail_commit=fail_commit)
     return env, new_role, current, draft, session, message
 
 
 @pytest.mark.parametrize("keep_previous_role", [False, True])
-def test_resaving_a_panel_updates_stale_open_tickets_roles_and_staff_authority(monkeypatch, keep_previous_role):
+def test_category_roles_update_existing_tickets_and_staff_authority(monkeypatch, keep_previous_role):
     async def scenario():
         env, new_role, current, draft, session, _message = synchronization(monkeypatch)
         env.current.overwrites[env.outsider] = discord.PermissionOverwrite(view_channel=False)
@@ -56,9 +59,9 @@ def test_resaving_a_panel_updates_stale_open_tickets_roles_and_staff_authority(m
         if keep_previous_role:
             draft.staff_role_ids = (5, 6)
         original = service.serialize_overwrites(env.current.overwrites)
-        await service.TicketService().panel(env.interaction, draft, None)
-        session.for_panel.assert_awaited_once_with(draft.id)
-        session.update_staff.assert_awaited_once_with(current, draft.staff_role_ids, None)
+        await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
+        session.for_category.assert_awaited_once_with(draft.category_key)
+        assert session.update_category.await_args.args[1]["staff_role_ids"] == draft.staff_role_ids
         assert (env.staff_role in env.current.overwrites) is keep_previous_role
         assert env.current.overwrites[new_role].view_channel
         assert env.current.overwrites[new_role].send_messages
@@ -91,7 +94,7 @@ def test_closed_ticket_sync_keeps_participants_hidden_and_updates_reopening_role
                 entry.update(allow=0, deny=discord.Permissions(view_channel=True).value)
         saved.append({"id": 12345, "type": "member", "allow": 1024, "deny": 0})
         current.saved_overwrites = json.dumps(saved)
-        await service.TicketService().panel(env.interaction, draft, None)
+        await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         updated = env.current.overwrites
         assert env.staff_role not in updated
         assert updated[new_role].view_channel is True and updated[new_role].send_messages is False
@@ -99,7 +102,7 @@ def test_closed_ticket_sync_keeps_participants_hidden_and_updates_reopening_role
         # This invited member now belongs to the new support team.
         assert updated[env.outsider].view_channel is True and updated[env.outsider].send_messages is False
         assert updated[env.guild.me].send_messages is True
-        snapshot = session.update_staff.await_args.args[2]
+        snapshot = session.update_category.await_args.args[2]
         entries = json.loads(snapshot)
         assert any(entry["id"] == 12345 for entry in entries)
         assert not any(entry["type"] == "role" and entry["id"] == 5 for entry in entries)
@@ -135,10 +138,13 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
             async with db.cursor() as cursor:
                 await cursor.execute("DELETE FROM tickets")
                 await cursor.execute("DELETE FROM ticket_panels")
+                await cursor.execute("DELETE FROM ticket_categories")
         finally:
             db.close()
         archived = Mock(spec=discord.TextChannel)
         archived.id, archived.guild = 50, env.guild
+        archived.topic = None
+        archived.history = env.current.history
         original = dict(env.current.overwrites)
         archived.overwrites = service.archive_overwrites(env.guild, original, (5,), creator_id=env.creator.id)
         archived.permissions_for.return_value = discord.Permissions(manage_channels=True, manage_roles=True)
@@ -148,17 +154,19 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
 
         archived.edit = AsyncMock(side_effect=edit)
         env.channels[50] = archived
+        env.panel.fetch_message = AsyncMock(return_value=SimpleNamespace(author=env.guild.me, edit=AsyncMock()))
         async with store.ticket_session(1) as session:
-            first_id = await session.save_panel(20, 200, 30, (5,), None)
-            second_id = await session.save_panel(20, 201, 30, (5,), None)
+            first_id = await session.save_panel(20, 200, 30, None)
+            second_id = await session.save_panel(20, 201, 30, None)
             first = await session.panel(first_id)
-            await session.create(10, 2, "report", first)
-            await session.create(50, 2, "shop", first)
+            await session.create(50, 2, "report", first, staff_role_ids=(5,))
             await session.close(await session.get(50), 8, "Résolu", service.serialize_overwrites(original))
-            await session.create(60, 3, "report", await session.panel(second_id))
-        draft = PanelDraft.from_panel(first)
+            await session.create(10, 2, "report", await session.panel(second_id), staff_role_ids=(5,))
+            await session.create(60, 3, "general", first, staff_role_ids=(5,))
+            original_category = await session.category("report")
+        draft = CategoryDraft.from_category(original_category)
         draft.staff_role_ids = (6,)
-        await service.TicketService().panel(env.interaction, draft, None)
+        await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         async with store.ticket_session(1) as session:
             assert (await session.get(10)).staff_role_ids == (6,)
             closed = await session.get(50)
@@ -167,9 +175,9 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
             assert new_role in restored and env.staff_role not in restored
             assert restored[new_role].send_messages is True
             assert (await session.get(60)).staff_role_ids == (5,)
-            assert {entry.channel_id for entry in await session.for_panel(first_id)} == {10, 50}
+            assert {entry.channel_id for entry in await session.for_category("report")} == {10, 50}
         async with store.ticket_session(999) as foreign:
-            assert await foreign.for_panel(first_id) == []
+            assert await foreign.for_category("report") == []
         assert env.current.overwrites[new_role].send_messages is True
         assert archived.overwrites[new_role].send_messages is False
         assert archived.overwrites[env.creator].view_channel is False
@@ -177,30 +185,30 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
     asyncio.run(scenario())
 
 
-def test_panel_sync_preserves_unrelated_overwrites_and_hides_former_staff_in_archives(monkeypatch):
+def test_category_sync_preserves_unrelated_overwrites_and_hides_former_staff_in_archives(monkeypatch):
     async def scenario():
         env, _new_role, _current, draft, _session, _message = synchronization(monkeypatch, closed=True)
         env.current.overwrites[env.staff] = service.member_overwrite()
         unrelated = Mock(spec=discord.Role)
         unrelated.id = 7
         env.current.overwrites[unrelated] = discord.PermissionOverwrite(view_channel=False, attach_files=False)
-        await service.TicketService().panel(env.interaction, draft, None)
+        await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         assert env.current.overwrites[env.staff].view_channel is False
         assert env.current.overwrites[unrelated].view_channel is False
         assert env.current.overwrites[unrelated].attach_files is False
     asyncio.run(scenario())
 
 
-def test_failed_panel_commit_restores_existing_ticket_permissions(monkeypatch):
+def test_failed_category_commit_restores_existing_ticket_permissions(monkeypatch):
     async def scenario():
         env, _new_role, _current, draft, session, message = synchronization(monkeypatch, fail_commit=True)
         original = service.serialize_overwrites(env.current.overwrites)
         with pytest.raises(RuntimeError, match="Commit failed"):
-            await service.TicketService().panel(env.interaction, draft, None)
+            await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         assert service.serialize_overwrites(env.current.overwrites) == original
         assert env.current.edit.await_count == 2
         assert message.edit.await_count == 2
-        session.update_staff.assert_awaited_once()
+        session.update_category.assert_awaited_once()
     asyncio.run(scenario())
 
 
@@ -211,22 +219,26 @@ def test_inaccessible_ticket_does_not_leave_other_tickets_partially_updated(monk
         other = Mock(spec=discord.TextChannel)
         other.id, other.guild = 50, env.guild
         other.overwrites = dict(env.current.overwrites)
+        other.history = env.current.history
+        other.topic = None
         other.permissions_for.return_value = discord.Permissions(manage_channels=True, manage_roles=True)
         other.edit = AsyncMock(side_effect=discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Denied"))
         env.channels[50] = other
-        session.for_panel.return_value.append(ticket(id=2, channel_id=50, panel_id=1))
+        session.for_category.return_value.append(ticket(id=2, channel_id=50, panel_id=1))
         if failure == "permissions":
             other.permissions_for.return_value = discord.Permissions.none()
         original = service.serialize_overwrites(env.current.overwrites)
         with pytest.raises((TicketError, discord.Forbidden)):
-            await service.TicketService().panel(env.interaction, draft, None)
+            await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         assert service.serialize_overwrites(env.current.overwrites) == original
-        message.edit.assert_not_awaited()
-        session.save_panel.assert_not_awaited()
+        assert session.save_category.await_count == 1
         if failure == "permissions":
+            message.edit.assert_not_awaited()
             env.current.edit.assert_not_awaited()
         else:
-            session.update_staff.assert_awaited_once_with(current, (6,), None)
+            assert message.edit.await_count == 2
+            assert session.update_category.await_args.args[0] == current
+            assert session.update_category.await_args.args[1]["staff_role_ids"] == (6,)
             assert env.current.edit.await_count == 2
     asyncio.run(scenario())
 
@@ -235,12 +247,13 @@ def test_unchanged_roles_skip_edits_and_deleted_ticket_channels_are_ignored(monk
     async def scenario():
         env, _new_role, current, draft, session, _message = synchronization(monkeypatch)
         current.staff_role_ids = (6,)
-        session.for_panel.return_value.append(ticket(id=2, channel_id=50, panel_id=1))
+        current.category_version = 2
+        session.for_category.return_value.append(ticket(id=2, channel_id=50, panel_id=1))
         env.guild.fetch_channel = AsyncMock(
             side_effect=discord.NotFound(SimpleNamespace(status=404, reason="Not Found"), "Missing"),
         )
-        await service.TicketService().panel(env.interaction, draft, None)
+        await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         env.current.edit.assert_not_awaited()
-        session.update_staff.assert_not_awaited()
+        session.update_category.assert_not_awaited()
         env.guild.fetch_channel.assert_awaited_once_with(50)
     asyncio.run(scenario())

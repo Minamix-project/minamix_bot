@@ -545,19 +545,19 @@ and command names are in English. Open the private setup interface with no param
 ```
 
 Manage Server or Administrator is required. Choose **Créer un panneau** or
-**Gérer les panneaux**. The creation/editor wizard has six steps:
+**Gérer les panneaux**. Use **Gérer les catégories** or `/ticket categories` for
+shared support-category settings. The panel creation/editor wizard has five steps:
 
 1. **Nom et message**: a modal sets the manager name (1–80 characters), public
    title (up to 256 characters), and multiline text (up to 4,000 characters).
    Blank title/text fields use the default panel message.
-2. **Rôles de support**: select 1–10 dedicated roles through Discord's role picker.
-3. **Catégorie des tickets**: select the category for private ticket channels.
-4. **Salon des transcripts**: optionally select a private text channel for the
+2. **Catégorie Discord des tickets**: select the category for private ticket channels.
+3. **Salon des transcripts**: optionally select a private text channel for the
    transcript files, or choose **Sans salon de transcripts**. Database storage
    remains enabled regardless of this choice.
-5. **Salon des logs de tickets**: optionally select a text channel for ticket
+4. **Salon des logs de tickets**: optionally select a text channel for ticket
    action summaries, or choose **Sans envoi de logs**.
-6. **Envoi du panneau**: select the destination text channel, then press
+5. **Envoi du panneau**: select the destination text channel, then press
    **Enregistrer et envoyer**.
 
 Each step has **Retour** and **Enregistrer et continuer**. Navigation retains the
@@ -570,7 +570,7 @@ The manager lists panels by ID and name, paginated in groups of 25. Each panel c
 be edited, sent/moved, or removed independently. Removal requires confirmation,
 disables that panel's public menu and retains its existing tickets. Moving a panel
 disables only its old message. Multiple panels can also share the same text channel.
-The migration preserves existing published panels, roles, transcript destinations,
+The migration preserves existing published panels, transcript destinations,
 message IDs and ticket numbers.
 
 Public panels offer Partnerships (🔗), Character validation (✅), Complaints (⛔),
@@ -623,16 +623,36 @@ one Bot ticket and one Complaints ticket may remain open together, but two Bot
 tickets are rejected even when opened through different panels or commands.
 New channels use explicit permissions for the creator, all configured support roles and the bot; other
 category permissions are not copied. Discord administrators can always access
-channels. Saving an edited panel synchronizes its support roles to all attached
-ticket channels, including tickets opened before the edit. Removed roles lose
-their managed grants, and new roles gain support access; explicit creator and
-guest permissions are preserved. Closed tickets remain private and read-only,
-and their saved reopening permissions receive the same role changes. The bot
-checks access to every affected channel before editing and restores completed
-Discord changes if persistence fails. Deleted channels are skipped. Re-saving
-the same panel also repairs stale role snapshots from an earlier edit.
-Transcript and ticket log destinations retain their creation-time values.
-Category/role removal requires panel reconfiguration.
+channels. Support roles belong to the selected help category, independently of
+which panel created the ticket. The six default categories are persisted per
+guild with **no support roles**; administrators configure them themselves with
+`/ticket categories`. Panels no longer store or edit support roles. With no
+roles configured, a new ticket is accessible to its creator, the bot and Discord
+administrators.
+
+The private category editor changes the name (100 characters), Unicode or
+accessible custom emoji, menu description (100 characters), opening message
+(2,000 characters), and zero to ten dedicated support roles. Unsaved drafts are
+discarded when switching categories. Saved edits use version checks to prevent
+concurrent overwrites. `/ticket create` autocompletion uses the current names.
+Category keys remain stable when renamed, so the per-category ticket limit is
+preserved.
+
+Saving a category updates every public panel menu and all its existing ticket
+channels, including tickets whose panel was deleted. It changes channel topics,
+opening embeds and support permissions while preserving ticket numbers and
+explicit creator/guest access. Closed tickets remain private and read-only;
+their saved reopening permissions receive the same role changes. Initial
+messages are tracked by ID; older ones are recovered among the first 50 messages
+when possible. Deleted opening messages are left deleted. Historical transcript
+files remain unchanged, while new exports and action logs use the current name.
+
+The bot checks affected channels before editing and restores completed Discord
+changes if persistence fails. Deleted channels are skipped. Startup synchronizes
+pending category versions and refreshes public menus. Transcript and ticket log
+destinations retain their creation-time values. Existing role snapshots are
+replaced by category roles during synchronization; former panel roles are not
+copied into the empty category defaults.
 
 Use `/ticket create reason:<choice> [user] [panel]` to open a ticket directly.
 The required `reason` dropdown contains the same six French categories as the
@@ -646,10 +666,12 @@ The optional `panel` autocomplete lists only panels in channels the requesting
 member can see. If omitted, the command uses the only available panel in the
 current channel, or the only available panel in the server. Ambiguous choices
 require selecting `panel`. Each ticket uses that panel's channel category,
-support roles, transcripts and ticket log destination.
+transcripts and ticket log destination; support roles come from the chosen help
+category.
 
 | Command | Access and behavior |
 | --- | --- |
+| `/ticket categories` | Administration; edit shared categories and synchronize their existing tickets |
 | `/ticket create <reason> [user] [panel]` | Everyone; create directly, with `user` restricted to administration |
 | `/ticket add <user>` | Support role or administration; grant access to another member |
 | `/ticket remove <user>` | Support role or administration; deny that member access |

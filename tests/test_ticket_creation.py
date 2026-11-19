@@ -10,7 +10,7 @@ import pytest
 
 from src.commands.support import ticket as command
 from src.utils import ticket_service as service
-from src.utils.tickets import CATEGORIES, CATEGORY_OPTIONS, TicketError
+from src.utils.tickets import CATEGORIES, TicketError
 from test_ticket_setup import panel_record
 from test_tickets import destination, install_session, ticket
 
@@ -19,11 +19,12 @@ def creation_session(monkeypatch, env, panels=None):
     panels = panels if panels is not None else [panel_record()]
     current = None
 
-    async def create(channel_id, creator_id, category, panel, *, number):
+    async def create(channel_id, creator_id, category, panel, *, number, staff_role_ids, category_version):
         nonlocal current
         current = ticket(
             channel_id=channel_id, creator_id=creator_id, category=category, ticket_number=number,
             panel_id=panel["id"], logs_channel_id=panel["logs_channel_id"],
+            staff_role_ids=staff_role_ids, category_version=category_version,
         )
 
     session = SimpleNamespace(
@@ -159,9 +160,8 @@ def test_create_command_has_french_reason_choices_and_private_response():
         create = group.get_command("create")
         options = {parameter.name: parameter for parameter in create.parameters}
         assert options["reason"].required
-        assert [(choice.name, choice.value) for choice in options["reason"].choices] == [
-            (f"{option.emoji} {option.label}", value) for value, option in CATEGORY_OPTIONS.items()
-        ]
+        assert options["reason"].autocomplete
+        assert not options["reason"].choices
         assert not options["user"].required and not options["panel"].required
         await create.callback(group, env.interaction, "report", user=env.creator, panel="1")
         manager.create.assert_awaited_once_with(env.interaction, "report", direct=True, user=env.creator, panel_id=1)

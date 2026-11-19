@@ -14,11 +14,12 @@ from src.utils.ticket_controls import TicketCloseView
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
 from src.utils.ticket_setup import SetupContext, SetupHome
-from src.utils.tickets import CATEGORY_OPTIONS, TicketError, category_label, record_staff_message, ticket_session
+from src.utils.tickets import CATEGORY_OPTIONS, TicketError, record_staff_message, ticket_session
+from src.utils.ticket_categories import CategoryEditor
 
 
 class TicketPanel(discord.ui.View):
-    def __init__(self, service):
+    def __init__(self, service, categories=None):
         super().__init__(timeout=None)
         self.service = service
         select = discord.ui.Select(
@@ -31,6 +32,18 @@ class TicketPanel(discord.ui.View):
         )
         select.callback = self.choose
         self.add_item(select)
+        self.set_categories(categories if categories is not None else [
+            {"category_key": key, "name": option.label, "emoji": option.emoji, "description": option.description}
+            for key, option in CATEGORY_OPTIONS.items()
+        ])
+
+    def set_categories(self, categories):
+        self.categories = tuple(categories)
+        self.children[0].options = [
+            discord.SelectOption(label=category["name"], value=category["category_key"],
+                                 emoji=category["emoji"], description=category["description"])
+            for category in categories
+        ]
 
     async def interaction_check(self, interaction):
         if interaction.guild_id in GUILD_IDS and isinstance(interaction.user, discord.Member):
@@ -41,7 +54,7 @@ class TicketPanel(discord.ui.View):
     async def choose(self, interaction):
         category = interaction.data["values"][0]
         # A fresh menu clears the client selection even when ticket creation is rejected.
-        await interaction.response.edit_message(view=TicketPanel(self.service))
+        await interaction.response.edit_message(view=TicketPanel(self.service, self.categories))
         ticket = await self.service.create(interaction, category)
         await interaction.followup.send(
             f"✅ Ton ticket a été créé : <#{ticket.channel_id}>.", ephemeral=True, allowed_mentions=NO_MENTIONS
@@ -85,10 +98,6 @@ class Tickets(app_commands.Group):
         user="Membre pour lequel ouvrir le ticket (administration uniquement)",
         panel="Panneau à utiliser si plusieurs sont disponibles ; facultatif sinon",
     )
-    @app_commands.choices(reason=[
-        app_commands.Choice(name=f"{option.emoji} {option.label}", value=value)
-        for value, option in CATEGORY_OPTIONS.items()
-    ])
     async def create(
         self, interaction: discord.Interaction, reason: str, user: discord.Member | None = None, panel: str | None = None
     ):
@@ -102,6 +111,33 @@ class Tickets(app_commands.Group):
         await interaction.followup.send(
             f"✅ {label} : <#{ticket.channel_id}>.", ephemeral=True, allowed_mentions=NO_MENTIONS
         )
+
+    @app_commands.command(name="categories", description="Personnaliser les catégories de tickets et leurs rôles de support.")
+    @app_commands.check(lambda interaction: is_admin(interaction.user))
+    async def categories(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        context = SetupContext(
+            self.service, lambda: TicketPanel(self.service), send_error, interaction.user.id, interaction.guild_id,
+        )
+        view = CategoryEditor(context, await self.service.categories(interaction))
+        view.build(interaction.guild)
+        view.message = await interaction.followup.send(
+            embed=view.embed(interaction), view=view, ephemeral=True, wait=True, allowed_mentions=NO_MENTIONS,
+        )
+
+    @create.autocomplete("reason")
+    async def create_reason_choices(self, interaction: discord.Interaction, current: str):
+        if interaction.guild_id not in GUILD_IDS or not isinstance(interaction.user, discord.Member):
+            return []
+        try:
+            categories = await self.service.categories(interaction)
+        except TicketError:
+            return []
+        query = current.casefold()
+        return [
+            app_commands.Choice(name=f"{category['emoji']} {category['name']}"[:100], value=category["category_key"])
+            for category in categories if query in category["name"].casefold() or query in category["category_key"]
+        ][:25]
 
     @create.autocomplete("panel")
     async def create_panel_choices(self, interaction: discord.Interaction, current: str):
@@ -169,7 +205,7 @@ class Tickets(app_commands.Group):
             staff, _events = await session.history(ticket)
             embed = discord.Embed(title=f"Ticket #{ticket.reference}", color=discord.Color.blurple())
             embed.add_field(name="Créateur", value=f"<@{ticket.creator_id}> (`{ticket.creator_id}`)")
-            embed.add_field(name="Catégorie", value=category_label(ticket.category))
+            embed.add_field(name="Catégorie", value=ticket.label)
             embed.add_field(name="État", value="Ouvert" if ticket.status == "open" else "Fermé")
             embed.add_field(
                 name="Création", value=discord.utils.format_dt(ticket.created_at.replace(tzinfo=timezone.utc))
@@ -342,6 +378,7 @@ class TicketActivity(commands.Cog):
         for guild_id in GUILD_IDS:
             guild = self.bot.get_guild(guild_id)
             if guild:
+                await self.service.sync_categories(guild)
                 await self.service.normalize_channel_names(guild)
                 await self.service.refresh_panel_menus(guild, lambda: TicketPanel(self.service))
         self.normalized = True

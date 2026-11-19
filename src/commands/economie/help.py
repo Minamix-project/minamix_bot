@@ -75,6 +75,7 @@ _MODERATION = (
 
 _ADMIN_TICKETS = (
     "`/ticket panel` — Créer, modifier, déplacer ou supprimer des panneaux avec l'assistant\n"
+    "`/ticket categories` — Personnaliser les catégories, leurs textes, emojis et rôles de support\n"
     "`/ticket create <reason> [user] [panel]` — Créer un ticket ; `user` réservé à l'administration\n"
     "`/ticket add <user>` — Ajouter un membre au ticket\n"
     "`/ticket remove <user>` — Retirer un membre du ticket\n"
@@ -86,8 +87,8 @@ _ADMIN_TICKETS = (
     "`/ticket link <user>` — Lier un utilisateur concerné sans lui donner accès\n"
     "`/ticket reconcile <channel_id> <reason>` — Régulariser un ticket dont le salon a été supprimé\n"
     "`/ticket purge` — Supprimer les tickets et leurs données, puis repartir à 0001 (confirmation)\n\n"
-    "**Accès :** panneaux, régularisation et purge réservés à l'administration. "
-    "La gestion des tickets est aussi ouverte aux rôles de support configurés.\n"
+    "**Accès :** panneaux, catégories, régularisation et purge réservés à l'administration. "
+    "La gestion des tickets est aussi ouverte aux rôles de support configurés par catégorie.\n"
     "Le bouton de fermeture avec confirmation est réservé au créateur ; le personnel utilise `/ticket close`.\n"
     "Les salons des transcripts et des logs de tickets se choisissent séparément dans chaque panneau. "
     "Consulte `/audit commande:ticket` pour l'historique administratif."

@@ -62,6 +62,7 @@ def destination():
     def channel(channel_id):
         value = Mock(spec=discord.TextChannel)
         value.id, value.guild, value.name, value.mention = channel_id, guild, f"ticket-{channel_id}", f"<#{channel_id}>"
+        value.topic = None
         value.overwrites = service.private_overwrites(guild, creator, [staff_role])
 
         def permissions_for(target):
@@ -96,6 +97,7 @@ def destination():
         value.messages = []
         value.permissions_for.side_effect = permissions_for
         value.edit, value.delete, value.send = AsyncMock(side_effect=edit), AsyncMock(side_effect=delete), AsyncMock()
+        value.send.return_value = SimpleNamespace(id=channel_id * 100)
         value.history = history
         channels[channel_id] = value
         return value
@@ -242,7 +244,19 @@ def test_transcript_includes_metadata_unicode_actions_replies_and_attachment_lin
     asyncio.run(scenario())
 
 
+def category_record(key="report", **changes):
+    option = store.CATEGORY_OPTIONS[key]
+    return {"category_key": key, "name": option.label, "emoji": option.emoji,
+            "description": option.description, "welcome": option.welcome, "staff_role_ids": (), "version": 1, **changes}
+
+
 def install_session(monkeypatch, session, *, fail_commit=False):
+    if not hasattr(session, "category"):
+        session.category = AsyncMock(side_effect=lambda key: category_record(key, staff_role_ids=(5,)))
+    if not hasattr(session, "categories"):
+        session.categories = AsyncMock(return_value=[category_record(key) for key in store.CATEGORY_OPTIONS])
+    if not hasattr(session, "set_welcome_message"):
+        session.set_welcome_message = AsyncMock()
     @asynccontextmanager
     async def context(guild_id):
         assert guild_id == 1
@@ -337,6 +351,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
             assert {item.name for item in group.commands} == {
                 "panel",
                 "create",
+                "categories",
                 "add",
                 "remove",
                 "rename",
@@ -348,7 +363,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "reconcile",
                 "purge",
             }
-            for name in ("panel", "reconcile", "purge"):
+            for name in ("panel", "categories", "reconcile", "purge"):
                 check = group.get_command(name).checks[0]
                 assert not check(SimpleNamespace(user=SimpleNamespace(guild_permissions=discord.Permissions.none())))
                 assert check(
@@ -461,7 +476,10 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         env = destination()
         manager = service.TicketService()
         async with store.ticket_session(1) as session:
-            await session.save_panel(20, 200, 30, (5,), None)
+            await session.save_panel(20, 200, 30, None)
+            category = store.CategoryDraft.from_category(await session.category("report"))
+            category.staff_role_ids = (5,)
+            await session.save_category(category)
             with pytest.raises(store.TicketError, match="en cours"):
                 async with store.ticket_session(1):
                     pytest.fail("The second connection acquired the guild lock")
@@ -554,7 +572,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         # Purge all ticket data for one guild while preserving another guild and its counter.
         async with store.ticket_session(999) as other:
             other_panel = {"staff_role_ids": (5,), "transcript_channel_id": None}
-            await other.save_panel(90, 900, 91, (5,), None)
+            await other.save_panel(90, 900, 91, None)
             await other.create(92, 2, "general", other_panel)
             foreign = await other.get(92)
             await other.save_transcript(foreign, 3, b"Other guild transcript")
@@ -613,7 +631,7 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
     async def scenario():
         env = destination()
         env.interaction.user = env.admin
-        draft = store.PanelDraft(id=1, staff_role_ids=(5,), category_id=30, channel_id=20, version=1)
+        draft = store.PanelDraft(id=1, category_id=30, channel_id=20, version=1)
         session = SimpleNamespace(
             panel=AsyncMock(return_value={"id": 1, "channel_id": 20, "message_id": 200, "version": 1}),
             for_panel=AsyncMock(return_value=[]),
@@ -632,7 +650,6 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
             20,
             200,
             30,
-            (5,),
             None,
             logs_channel_id=None,
             panel_id=1,
@@ -640,8 +657,8 @@ def test_panel_updates_existing_message_and_rejects_invalid_setup(monkeypatch):
             title=service.DEFAULT_PANEL_TITLE,
             text=service.DEFAULT_PANEL_TEXT,
         )
-        env.staff_role.is_default.return_value = True
-        with pytest.raises(store.TicketError, match="dédiés"):
+        draft.category_id = 999
+        with pytest.raises(store.TicketError, match="catégorie"):
             await service.TicketService().panel(env.interaction, draft, None)
 
     asyncio.run(scenario())
@@ -723,7 +740,6 @@ def test_custom_panel_title_text_and_bot_footer(monkeypatch):
             text=r"Bonjour !\nComment peut-on t'aider ?",
             category_id=30,
             channel_id=20,
-            staff_role_ids=(5,),
         )
         await service.TicketService().panel(env.interaction, draft, None)
         embed = env.panel.send.await_args.kwargs["embed"]
@@ -917,10 +933,10 @@ def test_mysql_upgrade_preserves_existing_numbers_and_backfills_per_guild_sequen
                     await cursor.execute("SELECT guild_id, next_number FROM ticket_sequences ORDER BY guild_id")
                     assert list(await cursor.fetchall()) == [(1, 23), (2, 43)]
                     await cursor.execute(
-                        "SELECT id, staff_role_ids, transcript_channel_id, channel_id, message_id FROM ticket_panels WHERE guild_id = 1"
+                        "SELECT id, transcript_channel_id, channel_id, message_id FROM ticket_panels WHERE guild_id = 1"
                     )
                     panel = await cursor.fetchone()
-                    assert json.loads(panel[1]) == [5] and panel[2:] == (60, 20, 200)
+                    assert panel[1:] == (60, 20, 200)
                     await cursor.execute(
                         "SELECT panel_id, staff_role_ids, transcript_channel_id FROM tickets WHERE id = 11"
                     )
@@ -962,7 +978,7 @@ def test_stale_panel_editor_is_rejected_before_publishing(monkeypatch):
         env.interaction.user = env.admin
         session = SimpleNamespace(panel=AsyncMock(return_value={"id": 1, "version": 2}))
         install_session(monkeypatch, session)
-        draft = store.PanelDraft(id=1, staff_role_ids=(5,), category_id=30, channel_id=20, version=1)
+        draft = store.PanelDraft(id=1, category_id=30, channel_id=20, version=1)
         with pytest.raises(store.TicketError, match="modifié ou supprimé"):
             await service.TicketService().panel(env.interaction, draft, None)
         env.panel.send.assert_not_awaited()
@@ -1019,18 +1035,18 @@ def test_mysql_multiple_panels_remain_independent_and_existing_tickets_keep_thei
             db.close()
         async with store.ticket_session(1) as session:
             first_id = await session.save_panel(
-                20, 200, 30, (5, 6), 60, logs_channel_id=70,
+                20, 200, 30, 60, logs_channel_id=70,
                 name="Support RP", title="RP", text="Explique ton problème."
             )
-            second_id = await session.save_panel(20, 201, 31, (7,), 61, logs_channel_id=71, name="Boutique")
+            second_id = await session.save_panel(20, 201, 31, 61, logs_channel_id=71, name="Boutique")
             first = await session.panel_for_message(20, 200)
             second = await session.panel_for_message(20, 201)
             assert first["id"] == first_id and second["id"] == second_id
             assert first["logs_channel_id"] == 70 and second["logs_channel_id"] == 71
-            await session.create(40, 2, "rp", first)
+            await session.create(40, 2, "rp", first, staff_role_ids=(5, 6))
             old_ticket = await session.get(40)
             await session.save_panel(
-                21, 210, 32, (8,), 62, logs_channel_id=72, panel_id=first_id, name="Support RP modifié"
+                21, 210, 32, 62, logs_channel_id=72, panel_id=first_id, name="Support RP modifié"
             )
         # A restart resolves each panel by its own message and retains optimistic edit versions.
         async with store.ticket_session(1) as session:

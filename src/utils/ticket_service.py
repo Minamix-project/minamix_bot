@@ -6,13 +6,14 @@ import io
 import json
 import logging
 import re
+import unicodedata
 
 import discord
 
 from src.utils.ticket_controls import TicketCloseView, ticket_embed
 from src.utils.ticket_logs import build_ticket_log
 from src.utils.permissions import is_admin
-from src.utils.tickets import CATEGORIES, CATEGORY_OPTIONS, TicketError, category_label, ticket_session
+from src.utils.tickets import TicketError, ticket_session
 
 logger = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -81,16 +82,17 @@ def validate_text_channel(channel, guild, *, attachments=False):
         )
 
 
-def validate_setup(guild, channel, category, staff_roles, transcript_channel, logs_channel=None):
+def validate_staff_roles(guild, staff_roles):
+    if len(staff_roles) > 10 or any(
+        role is None or role.guild.id != guild.id or role.is_default() or role.managed for role in staff_roles
+    ):
+        raise TicketError("Choisis jusqu’à 10 rôles de support dédiés, différents de @everyone et des rôles d’intégration.")
+
+
+def validate_setup(guild, channel, category, transcript_channel, logs_channel=None):
     validate_text_channel(channel, guild)
     if not isinstance(category, discord.CategoryChannel) or category.guild.id != guild.id:
         raise TicketError("Choisis une catégorie Discord de ce serveur pour les tickets.")
-    if not 1 <= len(staff_roles) <= 10 or any(
-        role is None or role.guild.id != guild.id or role.is_default() or role.managed for role in staff_roles
-    ):
-        raise TicketError(
-            "Choisis de 1 à 10 rôles de support dédiés, différents de @everyone et des rôles d'intégration."
-        )
     permissions = category.permissions_for(guild.me)
     if not (permissions.manage_channels and permissions.manage_roles):
         raise TicketError("Le bot doit pouvoir gérer les salons et les permissions dans la catégorie des tickets.")
@@ -230,6 +232,16 @@ def replace_saved_staff(guild, ticket, staff_roles):
     return json.dumps([*retained, *serialize_overwrites({role: member_overwrite() for role in staff_roles})])
 
 
+def opening_embed(bot_user, ticket, category):
+    embed = ticket_embed(
+        bot_user, title=f"{category['emoji']} Ticket #{ticket.reference} — {category['name']}",
+        description=category["welcome"] + "\n\nL'équipe de support te répondra prochainement.\n"
+        "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
+    )
+    embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
+    return embed
+
+
 def transcript_file(ticket, content):
     return discord.File(io.BytesIO(content), filename=f"ticket-{ticket.reference}.txt")
 
@@ -249,7 +261,7 @@ async def build_transcript(channel, ticket, session):
         f"Serveur : {ticket.guild_id}",
         f"Salon : {channel.name} ({channel.id})",
         f"Créateur : {ticket.creator_id}",
-        f"Catégorie : {category_label(ticket.category)}",
+        f"Catégorie : {ticket.label}",
         f"Création : {utc_label(ticket.created_at)}",
         f"État : {'Fermé' if ticket.status == 'closed' else 'Ouvert'}",
         f"Utilisateur concerné : {ticket.subject_id or '—'}",
@@ -323,11 +335,32 @@ class TicketService:
         async with ticket_session(interaction.guild_id) as session:
             return await session.panels()
 
-    async def sync_panel_roles(self, guild, panel_id, staff_roles, session, undo):
-        role_ids = tuple(role.id for role in staff_roles)
+    async def categories(self, interaction):
+        async with ticket_session(interaction.guild_id) as session:
+            return await session.categories()
+
+    async def welcome_message(self, guild, channel, ticket):
+        if ticket.welcome_message_id:
+            try:
+                message = await channel.fetch_message(ticket.welcome_message_id)
+                if message.author.id == guild.me.id:
+                    return message
+            except discord.NotFound:
+                pass
+        async for message in channel.history(limit=50, oldest_first=True):
+            if message.author.id == guild.me.id and any(
+                f"Ticket #{ticket.reference}" in (embed.title or "")
+                or f"Ticket #{ticket.id} —" in (embed.title or "") for embed in message.embeds
+            ):
+                return message
+        return None
+
+    async def sync_category_tickets(self, guild, category, session, undo):
+        staff_roles = [guild.get_role(role_id) for role_id in category["staff_role_ids"]]
+        validate_staff_roles(guild, staff_roles)
         plans = []
-        for ticket in await session.for_panel(panel_id):
-            if set(ticket.staff_role_ids) == set(role_ids):
+        for ticket in await session.for_category(category["category_key"]):
+            if ticket.category_version == category["version"] and set(ticket.staff_role_ids) == set(category["staff_role_ids"]):
                 continue
             channel = guild.get_channel(ticket.channel_id)
             if channel is None:
@@ -339,17 +372,78 @@ class TicketService:
                 raise TicketError(f"Le salon du ticket #{ticket.reference} n'est pas un salon textuel de ce serveur.")
             permissions = channel.permissions_for(guild.me)
             if not (permissions.manage_channels and permissions.manage_roles):
-                raise TicketError(
-                    f"Le bot doit pouvoir gérer le salon et les permissions du ticket #{ticket.reference} "
-                    "pour actualiser les rôles du panneau."
-                )
+                raise TicketError(f"Le bot doit pouvoir gérer le salon et les permissions du ticket #{ticket.reference}.")
+            message = await self.welcome_message(guild, channel, ticket)
             old = channel.overwrites
-            updated = replace_staff_overwrites(guild, ticket, old, staff_roles)
-            plans.append((ticket, channel, old, updated, replace_saved_staff(guild, ticket, staff_roles)))
-        for ticket, channel, old, updated, saved in plans:
-            await channel.edit(overwrites=updated, reason="Mise à jour des rôles de support du panneau")
-            undo.append(lambda channel=channel, old=old: channel.edit(overwrites=old))
-            await session.update_staff(ticket, role_ids, saved)
+            plans.append((ticket, channel, old, replace_staff_overwrites(guild, ticket, old, staff_roles),
+                          replace_saved_staff(guild, ticket, staff_roles), message))
+        for ticket, channel, old, updated, saved, message in plans:
+            old_topic = channel.topic
+            await channel.edit(overwrites=updated, topic=f"Aurum | {category['name']} | {ticket.creator_id}",
+                               reason="Mise à jour de la catégorie de support")
+            undo.append(lambda channel=channel, old=old, topic=old_topic: channel.edit(overwrites=old, topic=topic))
+            if message:
+                old_embeds = list(message.embeds)
+                await message.edit(embed=opening_embed(guild.me, ticket, category), allowed_mentions=NO_MENTIONS)
+                undo.append(lambda message=message, embeds=old_embeds: message.edit(embeds=embeds, allowed_mentions=NO_MENTIONS))
+            await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id)
+
+    async def save_category(self, interaction, draft, view_factory):
+        if not is_admin(interaction.user):
+            raise TicketError("Cette action est réservée à l'administration du serveur.")
+        draft.name, draft.emoji = draft.name.strip(), draft.emoji.strip()
+        draft.description, draft.welcome = draft.description.strip(), draft.welcome.strip()
+        if not (1 <= len(draft.name) <= 100 and 1 <= len(draft.description) <= 100
+                and 1 <= len(draft.welcome) <= 2000 and 1 <= len(draft.emoji) <= 100):
+            raise TicketError("Indique un nom et une description de 100 caractères maximum, un emoji et un message de 2 000 caractères maximum.")
+        emoji = discord.PartialEmoji.from_str(draft.emoji)
+        if emoji.is_custom_emoji():
+            resolved = interaction.client.get_emoji(emoji.id)
+            if resolved is None or not resolved.is_usable():
+                raise TicketError("Cet emoji personnalisé n'est pas accessible au bot.")
+        elif not any(unicodedata.category(char) in {"So", "Sk"} or char == "\u20e3" for char in draft.emoji):
+            raise TicketError("Indique un emoji Unicode ou un emoji personnalisé accessible au bot.")
+        validate_staff_roles(interaction.guild, [interaction.guild.get_role(role_id) for role_id in draft.staff_role_ids])
+        async with operation(interaction.guild_id) as (session, undo):
+            previous = await session.category(draft.category_key)
+            if previous is None or previous["version"] != draft.version:
+                raise TicketError("Cette catégorie a été modifiée. Rouvre le gestionnaire avant de l'éditer.")
+            old_categories = await session.categories()
+            await session.save_category(draft)
+            category = await session.category(draft.category_key)
+            await self.sync_category_tickets(interaction.guild, category, session, undo)
+            categories = await session.categories()
+            for panel in await session.panels():
+                channel = interaction.guild.get_channel(panel["channel_id"])
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+                try:
+                    message = await channel.fetch_message(panel["message_id"])
+                except discord.NotFound:
+                    continue
+                if message.author.id != interaction.client.user.id:
+                    continue
+                view, old_view = view_factory(), view_factory()
+                view.set_categories(categories)
+                old_view.set_categories(old_categories)
+                await message.edit(view=view)
+                undo.append(lambda message=message, old_view=old_view: message.edit(view=old_view))
+            await session.execute(
+                "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
+                (interaction.guild_id, interaction.user.id, f"ticket.category: key={draft.category_key}"),
+            )
+        return category
+
+    async def sync_categories(self, guild):
+        async with ticket_session(guild.id) as session:
+            categories = await session.categories()
+        for category in categories:
+            try:
+                async with operation(guild.id) as (session, undo):
+                    current = await session.category(category["category_key"])
+                    await self.sync_category_tickets(guild, current, session, undo)
+            except (TicketError, discord.HTTPException):
+                logger.warning("Could not synchronize ticket category guild=%s category=%s", guild.id, category["category_key"])
 
     async def panel(self, interaction, draft, view):
         if not is_admin(interaction.user):
@@ -357,14 +451,13 @@ class TicketService:
         guild = interaction.guild
         channel = guild.get_channel(draft.channel_id)
         category = guild.get_channel(draft.category_id)
-        staff_roles = [guild.get_role(role_id) for role_id in draft.staff_role_ids]
         transcript_channel = guild.get_channel(draft.transcript_channel_id) if draft.transcript_channel_id else None
         logs_channel = guild.get_channel(draft.logs_channel_id) if draft.logs_channel_id else None
         if draft.transcript_channel_id and transcript_channel is None:
             raise TicketError("Le salon des transcripts n'existe plus. Sélectionne un autre salon.")
         if draft.logs_channel_id and logs_channel is None:
             raise TicketError("Le salon des logs de tickets n'existe plus. Sélectionne un autre salon.")
-        validate_setup(guild, channel, category, staff_roles, transcript_channel, logs_channel)
+        validate_setup(guild, channel, category, transcript_channel, logs_channel)
         if logs_channel and not logs_channel.permissions_for(interaction.user).view_channel:
             raise TicketError("Tu dois pouvoir voir le salon des logs de tickets.")
         if not channel.permissions_for(interaction.user).view_channel:
@@ -383,8 +476,8 @@ class TicketService:
                 raise TicketError("Ce panneau a été modifié ou supprimé. Rouvre le gestionnaire avant de l'éditer.")
             if await session.get(channel.id):
                 raise TicketError("Le panneau doit être envoyé dans un salon qui n'est pas un ticket.")
-            if previous:
-                await self.sync_panel_roles(guild, draft.id, staff_roles, session, undo)
+            if view is not None:
+                view.set_categories(await session.categories())
             message = None
             if previous and previous["channel_id"] == channel.id:
                 try:
@@ -404,7 +497,6 @@ class TicketService:
                 channel.id,
                 message.id,
                 category.id,
-                draft.staff_role_ids,
                 draft.transcript_channel_id,
                 logs_channel_id=draft.logs_channel_id,
                 panel_id=draft.id,
@@ -463,14 +555,15 @@ class TicketService:
             return self.visible_panels(interaction, await session.panels())
 
     async def create(self, interaction, category, *, direct=False, user=None, panel_id=None):
-        if category not in CATEGORIES:
-            raise TicketError("Cette catégorie de ticket est inconnue.")
         if user is not None and not is_admin(interaction.user):
             raise TicketError("Seule l'administration peut créer un ticket pour un autre membre avec `user`.")
         creator = user if user is not None else interaction.user
         if creator.guild.id != interaction.guild_id or creator.bot:
             raise TicketError("Choisis un membre de ce serveur qui n'est pas un bot.")
         async with operation(interaction.guild_id) as (session, undo):
+            option = await session.category(category)
+            if option is None:
+                raise TicketError("Cette catégorie de ticket est inconnue.")
             if direct:
                 panels = self.visible_panels(interaction, await session.panels())
                 if panel_id is not None:
@@ -500,8 +593,9 @@ class TicketService:
                 )
             guild = interaction.guild
             destination = guild.get_channel(panel["category_id"])
-            staff_roles = [guild.get_role(role_id) for role_id in panel["staff_role_ids"]]
-            validate_setup(guild, guild.get_channel(panel["channel_id"]), destination, staff_roles, None)
+            staff_roles = [guild.get_role(role_id) for role_id in option["staff_role_ids"]]
+            validate_staff_roles(guild, staff_roles)
+            validate_setup(guild, guild.get_channel(panel["channel_id"]), destination, None)
             if len(destination.channels) >= 50:
                 raise TicketError("La catégorie de support est pleine. Contacte le personnel.")
             number = await session.next_number()
@@ -509,28 +603,22 @@ class TicketService:
                 f"ticket-{number:04d}",
                 category=destination,
                 overwrites=private_overwrites(guild, creator, staff_roles),
-                topic=f"Aurum | {CATEGORIES[category]} | {creator.id}",
+                topic=f"Aurum | {option['name']} | {creator.id}",
                 reason="Création d'un ticket de support",
             )
             undo.append(channel.delete)
-            await session.create(channel.id, creator.id, category, panel, number=number)
+            await session.create(channel.id, creator.id, category, panel, number=number,
+                                 staff_role_ids=option["staff_role_ids"], category_version=option["version"])
             ticket = await session.get(channel.id)
             await session.event(
                 ticket,
                 interaction.user.id,
                 "created",
-                CATEGORIES[category],
+                option["name"],
                 staff=is_staff(interaction.user, ticket.staff_role_ids),
             )
-            option = CATEGORY_OPTIONS[category]
-            embed = ticket_embed(
-                interaction.client.user,
-                title=f"{option.emoji} Ticket #{ticket.reference} — {option.label}",
-                description=option.welcome + "\n\nL'équipe de support te répondra prochainement.\n"
-                "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
-            )
-            embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
-            await channel.send(
+            embed = opening_embed(interaction.client.user, ticket, option)
+            message = await channel.send(
                 f"Bienvenue <@{creator.id}> !",
                 embed=embed,
                 view=TicketCloseView(self),
@@ -538,6 +626,7 @@ class TicketService:
                     everyone=False, roles=False, users=[creator], replied_user=False
                 ),
             )
+            await session.set_welcome_message(ticket, message.id)
         await self.log_action(interaction.guild, ticket, "created", interaction.user.id)
         return ticket
 
@@ -616,10 +705,10 @@ class TicketService:
                     if is_staff(user, ticket.staff_role_ids):
                         raise TicketError(
                             "Ce membre appartient au personnel autorisé. Son accès est géré par les rôles "
-                            "du panneau, sans `/ticket add`."
+                            "de la catégorie, sans `/ticket add`."
                             if action == "added"
                             else "Tu ne peux pas retirer un membre du personnel autorisé avec cette commande. "
-                            "Son accès est géré par les rôles du panneau."
+                            "Son accès est géré par les rôles de la catégorie."
                         )
                     old = channel.overwrites
                     updated = dict(old)
@@ -672,6 +761,7 @@ class TicketService:
         """Refresh persisted menus while retaining the administrator's panel text."""
         async with ticket_session(guild.id) as session:
             panels = await session.panels()
+            categories = await session.categories()
         for panel in panels:
             channel = guild.get_channel(panel["channel_id"])
             if not isinstance(channel, discord.TextChannel):
@@ -679,7 +769,9 @@ class TicketService:
             try:
                 message = await channel.fetch_message(panel["message_id"])
                 if message.author.id == guild.me.id:
-                    await message.edit(view=view_factory())
+                    view = view_factory()
+                    view.set_categories(categories)
+                    await message.edit(view=view)
             except discord.NotFound:
                 continue
             except discord.HTTPException:

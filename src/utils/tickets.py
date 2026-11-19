@@ -61,12 +61,26 @@ class TicketError(Exception):
 
 
 @dataclass
+class CategoryDraft:
+    category_key: str
+    name: str
+    emoji: str
+    description: str
+    welcome: str
+    staff_role_ids: tuple[int, ...] = ()
+    version: int = 1
+
+    @classmethod
+    def from_category(cls, category):
+        return cls(**{key: category[key] for key in cls.__dataclass_fields__})
+
+
+@dataclass
 class PanelDraft:
     id: int | None = None
     name: str = "Support"
     title: str | None = None
     text: str | None = None
-    staff_role_ids: tuple[int, ...] = ()
     category_id: int | None = None
     transcript_channel_id: int | None = None
     logs_channel_id: int | None = None
@@ -80,7 +94,6 @@ class PanelDraft:
             name=panel["name"],
             title=panel["title"],
             text=panel["description"],
-            staff_role_ids=tuple(panel["staff_role_ids"]),
             category_id=panel["category_id"],
             transcript_channel_id=panel["transcript_channel_id"],
             logs_channel_id=panel["logs_channel_id"],
@@ -109,6 +122,9 @@ class Ticket:
     ticket_number: int | None = None
     panel_id: int | None = None
     logs_channel_id: int | None = None
+    category_version: int = 0
+    welcome_message_id: int | None = None
+    category_name: str | None = None
 
     @classmethod
     def from_row(cls, row):
@@ -118,11 +134,16 @@ class Ticket:
     def reference(self):
         return f"{self.ticket_number if self.ticket_number is not None else self.id:04d}"
 
+    @property
+    def label(self):
+        return self.category_name or category_label(self.category)
+
 
 class TicketSession:
     def __init__(self, db, guild_id):
         self.db = db
         self.guild_id = guild_id
+        self.categories_ready = False
 
     async def execute(self, sql, args=None):
         async with self.db.cursor(aiomysql.DictCursor) as cursor:
@@ -134,31 +155,64 @@ class TicketSession:
             await cursor.execute(sql, args)
             return await cursor.fetchall()
 
-    @staticmethod
-    def panel_row(row):
-        return {**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))}
+    async def ensure_categories(self):
+        if self.categories_ready:
+            return
+        for position, (key, option) in enumerate(CATEGORY_OPTIONS.items()):
+            await self.execute(
+                "INSERT INTO ticket_categories "
+                "(guild_id, category_key, name, emoji, description, welcome, staff_role_ids, position) "
+                "VALUES (%s, %s, %s, %s, %s, %s, JSON_ARRAY(), %s) "
+                "ON DUPLICATE KEY UPDATE category_key = ticket_categories.category_key",
+                (self.guild_id, key, option.label, option.emoji, option.description, option.welcome, position),
+            )
+        self.categories_ready = True
+
+    async def categories(self):
+        await self.ensure_categories()
+        rows = await self.rows(
+            "SELECT * FROM ticket_categories WHERE guild_id = %s ORDER BY position, category_key", (self.guild_id,),
+        )
+        return [{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))} for row in rows]
+
+    async def category(self, key):
+        return next((category for category in await self.categories() if category["category_key"] == key), None)
+
+    async def save_category(self, draft):
+        await self.execute(
+            "UPDATE ticket_categories SET name = %s, emoji = %s, description = %s, welcome = %s, "
+            "staff_role_ids = %s, version = version + 1 WHERE guild_id = %s AND category_key = %s",
+            (draft.name, draft.emoji, draft.description, draft.welcome, json.dumps(list(draft.staff_role_ids)),
+             self.guild_id, draft.category_key),
+        )
+
+    async def ticket_rows(self, condition, args):
+        rows = await self.rows(
+            "SELECT t.*, c.name AS category_name FROM tickets t LEFT JOIN ticket_categories c "
+            "ON c.guild_id = t.guild_id AND c.category_key = t.category WHERE " + condition, args,
+        )
+        return [Ticket.from_row(row) for row in rows]
 
     async def panels(self):
         rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s ORDER BY id", (self.guild_id,))
-        return [self.panel_row(row) for row in rows]
+        return list(rows)
 
     async def panel(self, panel_id):
         rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s AND id = %s", (self.guild_id, panel_id))
-        return self.panel_row(rows[0]) if rows else None
+        return rows[0] if rows else None
 
     async def panel_for_message(self, channel_id, message_id):
         rows = await self.rows(
             "SELECT * FROM ticket_panels WHERE guild_id = %s AND channel_id = %s AND message_id = %s",
             (self.guild_id, channel_id, message_id),
         )
-        return self.panel_row(rows[0]) if rows else None
+        return rows[0] if rows else None
 
     async def save_panel(
         self,
         channel_id,
         message_id,
         category_id,
-        staff_role_ids,
         transcript_channel_id,
         *,
         logs_channel_id=None,
@@ -171,7 +225,6 @@ class TicketSession:
             channel_id,
             message_id,
             category_id,
-            json.dumps(list(staff_role_ids)),
             transcript_channel_id,
             logs_channel_id,
             name,
@@ -180,12 +233,12 @@ class TicketSession:
         )
         if panel_id is None:
             return await self.execute(
-                "INSERT INTO ticket_panels (channel_id, message_id, category_id, staff_role_ids, transcript_channel_id, "
-                "logs_channel_id, name, title, description, guild_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO ticket_panels (channel_id, message_id, category_id, transcript_channel_id, "
+                "logs_channel_id, name, title, description, guild_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (*values, self.guild_id),
             )
         await self.execute(
-            "UPDATE ticket_panels SET channel_id = %s, message_id = %s, category_id = %s, staff_role_ids = %s, "
+            "UPDATE ticket_panels SET channel_id = %s, message_id = %s, category_id = %s, "
             "transcript_channel_id = %s, logs_channel_id = %s, name = %s, title = %s, description = %s, version = version + 1 "
             "WHERE guild_id = %s AND id = %s",
             (*values, self.guild_id, panel_id),
@@ -196,18 +249,18 @@ class TicketSession:
         await self.execute("DELETE FROM ticket_panels WHERE guild_id = %s AND id = %s", (self.guild_id, panel_id))
 
     async def get(self, channel_id):
-        rows = await self.rows(
-            "SELECT * FROM tickets WHERE guild_id = %s AND channel_id = %s",
+        rows = await self.ticket_rows(
+            "t.guild_id = %s AND t.channel_id = %s",
             (self.guild_id, channel_id),
         )
-        return Ticket.from_row(rows[0]) if rows else None
+        return rows[0] if rows else None
 
     async def active(self, creator_id, category):
-        rows = await self.rows(
-            "SELECT * FROM tickets WHERE guild_id = %s AND active_creator = %s AND category = %s",
+        rows = await self.ticket_rows(
+            "t.guild_id = %s AND t.active_creator = %s AND t.category = %s",
             (self.guild_id, creator_id, category),
         )
-        return Ticket.from_row(rows[0]) if rows else None
+        return rows[0] if rows else None
 
     async def next_number(self):
         await self.execute(
@@ -224,20 +277,25 @@ class TicketSession:
         return number
 
     async def all(self):
-        rows = await self.rows("SELECT * FROM tickets WHERE guild_id = %s ORDER BY id", (self.guild_id,))
-        return [Ticket.from_row(row) for row in rows]
+        return await self.ticket_rows("t.guild_id = %s ORDER BY t.id", (self.guild_id,))
 
-    async def for_panel(self, panel_id):
-        rows = await self.rows(
-            "SELECT * FROM tickets WHERE guild_id = %s AND panel_id = %s ORDER BY id",
-            (self.guild_id, panel_id),
+    async def for_category(self, key):
+        return await self.ticket_rows(
+            "t.guild_id = %s AND t.category = %s ORDER BY t.id", (self.guild_id, key),
         )
-        return [Ticket.from_row(row) for row in rows]
 
-    async def update_staff(self, ticket, role_ids, saved_overwrites):
+    async def update_category(self, ticket, category, saved_overwrites, welcome_message_id):
         await self.execute(
-            "UPDATE tickets SET staff_role_ids = %s, saved_overwrites = %s WHERE guild_id = %s AND id = %s",
-            (json.dumps(list(role_ids)), saved_overwrites, self.guild_id, ticket.id),
+            "UPDATE tickets SET staff_role_ids = %s, saved_overwrites = %s, category_version = %s, "
+            "welcome_message_id = %s WHERE guild_id = %s AND id = %s",
+            (json.dumps(list(category["staff_role_ids"])), saved_overwrites, category["version"],
+             welcome_message_id, self.guild_id, ticket.id),
+        )
+
+    async def set_welcome_message(self, ticket, message_id):
+        await self.execute(
+            "UPDATE tickets SET welcome_message_id = %s WHERE guild_id = %s AND id = %s",
+            (message_id, self.guild_id, ticket.id),
         )
 
     async def purge(self):
@@ -262,23 +320,24 @@ class TicketSession:
             "DELETE FROM admin_audit WHERE guild_id = %s AND action LIKE %s", (self.guild_id, "ticket.%")
         )
 
-    async def create(self, channel_id, creator_id, category, panel, *, number=None):
+    async def create(self, channel_id, creator_id, category, panel, *, number=None, staff_role_ids=(), category_version=0):
         if number is None:
             number = await self.next_number()
         return await self.execute(
             "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, "
-            "logs_channel_id, ticket_number, panel_id, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            "logs_channel_id, ticket_number, panel_id, category_version, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
             (
                 self.guild_id,
                 channel_id,
                 creator_id,
                 category,
-                json.dumps(list(panel["staff_role_ids"])),
+                json.dumps(list(staff_role_ids)),
                 panel["transcript_channel_id"],
                 panel.get("logs_channel_id"),
                 number,
                 panel.get("id"),
+                category_version,
             ),
         )
 

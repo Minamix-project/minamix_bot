@@ -82,7 +82,7 @@ class SetupHome(SetupView):
         self.build(None)
 
     def embed(self, interaction):
-        text = "Crée un panneau ou modifie un panneau existant. Chaque panneau possède ses propres rôles et destinations.\n\n"
+        text = "Crée un panneau ou modifie un panneau existant. Chaque panneau possède ses propres destinations. Les rôles se règlent par catégorie de demande.\n\n"
         text += "L'assistant te guide étape par étape. Les modifications sont publiées à la dernière étape."
         if self.notice:
             text = self.notice + "\n\n" + text
@@ -92,6 +92,13 @@ class SetupHome(SetupView):
         self.clear_items()
         self.button("Créer un panneau", self.create, style=discord.ButtonStyle.success, row=0)
         self.button("Gérer les panneaux", self.manage, style=discord.ButtonStyle.primary, row=0)
+        self.button("Gérer les catégories", self.categories, row=1)
+
+    async def categories(self, interaction):
+        from src.utils.ticket_categories import CategoryEditor
+        await interaction.response.defer()
+        categories = await self.context.service.categories(interaction)
+        await self.show(interaction, CategoryEditor(self.context, categories))
 
     async def create(self, interaction):
         await self.show(interaction, PanelWizard(self.context))
@@ -144,10 +151,10 @@ class PanelTextModal(discord.ui.Modal):
 
 class PanelWizard(SetupView):
     STEPS = (
-        "Nom et message", "Rôles de support", "Catégorie des tickets", "Salon des transcripts",
+        "Nom et message", "Catégorie Discord des tickets", "Salon des transcripts",
         "Salon des logs de tickets", "Envoi du panneau",
     )
-    CHANNEL_FIELDS = {2: "category_id", 3: "transcript_channel_id", 4: "logs_channel_id", 5: "channel_id"}
+    CHANNEL_FIELDS = {1: "category_id", 2: "transcript_channel_id", 3: "logs_channel_id", 4: "channel_id"}
 
     def __init__(self, context, draft=None, *, step=0):
         super().__init__(context)
@@ -159,8 +166,6 @@ class PanelWizard(SetupView):
         draft = self.draft
         instructions = (
             "Ouvre le formulaire pour définir le nom du panneau, son titre et son texte. Les champs vides gardent le message par défaut.",
-            "Sélectionne de 1 à 10 rôles qui pourront voir et gérer les tickets de ce panneau. "
-            "À l'enregistrement, les rôles seront aussi actualisés dans ses tickets existants.",
             "Sélectionne la catégorie Discord dans laquelle Aurum créera les salons privés.",
             "Choisis un salon privé pour recevoir les fichiers d'historique, ou continue sans salon. "
             "Les transcripts restent sauvegardés.",
@@ -175,9 +180,6 @@ class PanelWizard(SetupView):
         if self.step in (0, len(self.STEPS) - 1):
             embed.add_field(name="Titre affiché", value=draft.title or DEFAULT_PANEL_TITLE, inline=False)
             embed.add_field(name="Texte affiché", value=(draft.text or DEFAULT_PANEL_TEXT)[:1000], inline=False)
-        embed.add_field(
-            name="Rôles de support", value=" ".join(f"<@&{role_id}>" for role_id in draft.staff_role_ids) or "À choisir"
-        )
         embed.add_field(name="Catégorie", value=f"<#{draft.category_id}>" if draft.category_id else "À choisir")
         embed.add_field(
             name="Transcripts",
@@ -194,38 +196,27 @@ class PanelWizard(SetupView):
         draft = self.draft
         if self.step == 0:
             self.button("Modifier le nom et le message", self.edit_text, style=discord.ButtonStyle.primary, row=0)
-        elif self.step == 1:
-            roles = [guild.get_role(role_id) for role_id in draft.staff_role_ids]
-            select = discord.ui.RoleSelect(
-                placeholder="Sélectionne les rôles de support…",
-                min_values=1,
-                max_values=10,
-                default_values=[role for role in roles if role],
-                row=0,
-            )
-            select.callback = self.select_roles
-            self.add_item(select)
         else:
             field = self.CHANNEL_FIELDS[self.step]
             selected = guild.get_channel(getattr(draft, field)) if getattr(draft, field) else None
             select = discord.ui.ChannelSelect(
                 placeholder={
-                    2: "Catégorie des salons de tickets…",
-                    3: "Salon privé des transcripts (facultatif)…",
-                    4: "Salon des logs de tickets (facultatif)…",
-                    5: "Salon d'envoi du panneau…",
+                    1: "Catégorie des salons de tickets…",
+                    2: "Salon privé des transcripts (facultatif)…",
+                    3: "Salon des logs de tickets (facultatif)…",
+                    4: "Salon d'envoi du panneau…",
                 }[self.step],
-                channel_types=[discord.ChannelType.category if self.step == 2 else discord.ChannelType.text],
-                min_values=0 if self.step in (3, 4) else 1,
+                channel_types=[discord.ChannelType.category if self.step == 1 else discord.ChannelType.text],
+                min_values=0 if self.step in (2, 3) else 1,
                 max_values=1,
                 default_values=[selected] if selected else [],
                 row=0,
             )
             select.callback = self.select_channel
             self.add_item(select)
-            if self.step == 3:
+            if self.step == 2:
                 self.button("Sans salon de transcripts", self.clear_transcripts, row=1)
-            elif self.step == 4:
+            elif self.step == 3:
                 self.button("Sans envoi de logs", self.clear_logs, row=1)
         self.button("Retour", self.back, row=2)
         self.button(
@@ -239,32 +230,21 @@ class PanelWizard(SetupView):
     async def edit_text(self, interaction):
         await interaction.response.send_modal(PanelTextModal(self))
 
-    async def select_roles(self, interaction):
-        role_ids = tuple(dict.fromkeys(int(value) for value in interaction.data["values"]))
-        roles = [interaction.guild.get_role(role_id) for role_id in role_ids]
-        if not roles or len(roles) > 10 or any(role is None or role.is_default() or role.managed for role in roles):
-            raise TicketError(
-                "Choisis de 1 à 10 rôles de support dédiés, différents de @everyone et des rôles d'intégration."
-            )
-        self.draft.staff_role_ids = role_ids
-        self.generation += 1
-        await self.render(interaction)
-
     async def select_channel(self, interaction):
         values = interaction.data["values"]
         channel_id = int(values[0]) if values else None
         field = self.CHANNEL_FIELDS[self.step]
         channel = interaction.guild.get_channel(channel_id) if channel_id else None
-        if self.step == 2:
+        if self.step == 1:
             if not isinstance(channel, discord.CategoryChannel):
                 raise TicketError("Choisis une catégorie de ce serveur.")
         elif channel_id:
-            validate_text_channel(channel, interaction.guild, attachments=self.step == 3)
+            validate_text_channel(channel, interaction.guild, attachments=self.step == 2)
             if not channel.permissions_for(interaction.user).view_channel:
                 raise TicketError("Tu dois pouvoir voir le salon sélectionné.")
-            if self.step == 3 and channel.permissions_for(interaction.guild.default_role).view_channel:
+            if self.step == 2 and channel.permissions_for(interaction.guild.default_role).view_channel:
                 raise TicketError("Le salon des transcripts doit être privé.")
-        elif self.step not in (3, 4):
+        elif self.step not in (2, 3):
             raise TicketError("Choisis un salon avant de continuer.")
         setattr(self.draft, field, channel_id)
         self.generation += 1
@@ -292,9 +272,7 @@ class PanelWizard(SetupView):
         await self.show(interaction, SetupHome(self.context, "Modifications non enregistrées abandonnées."))
 
     async def advance(self, interaction):
-        if self.step == 1 and not self.draft.staff_role_ids:
-            raise TicketError("Sélectionne au moins un rôle de support avant de continuer.")
-        if self.step == 2 and not self.draft.category_id:
+        if self.step == 1 and not self.draft.category_id:
             raise TicketError("Sélectionne une catégorie avant de continuer.")
         if self.step < len(self.STEPS) - 1:
             self.step += 1
