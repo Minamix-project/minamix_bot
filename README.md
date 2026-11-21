@@ -645,13 +645,20 @@ open ticket. Administrator permissions alone do not grant claim eligibility.
 Only one person can claim a ticket; concurrent requests are serialized and
 guarded in MySQL. Claiming does not modify channel access or other staff powers.
 
-The opening embed shows the responsible member and claim time. The channel name
-keeps its number first, for example `ticket-0001-🟢-alice`. Only the responsible
-member can use **Libérer le ticket** or `/ticket release`, including after a
-restart; there is no administrator override or reassignment action. Release
-restores the original channel name. Renaming a claimed ticket retains its
-marker and updates the name that will be restored on release. Claim history is
-included in action logs, the administrative audit and transcripts.
+The opening embed shows the responsible member and claim time. An open,
+unassigned ticket with claiming enabled ends in a red dot: `ticket-0001-🔴`.
+Claiming replaces it with the responsible member's marker and name, for example
+`ticket-0001-🟢-alice`. Support staff can set their personal Unicode marker with
+`/ticket emoji emoji:🎯`; `/ticket emoji` without an argument restores the green
+dot. The preference is saved per server and immediately updates their assigned
+tickets, always retaining the member's name after the marker.
+
+The responsible member or an administrator (Administrator or Manage Server) can
+use **Libérer le ticket** or `/ticket release`, including after a restart.
+Release restores the base name and adds the red dot if the ticket is open and
+claiming remains enabled. Renaming retains the appropriate marker and updates
+the saved base name. Claim history includes both the releasing actor and former
+responsible member in action logs, the administrative audit and transcripts.
 
 Disabling claiming prevents new claims and hides the claim button. An existing
 responsible member keeps their assignment and can still release it while they
@@ -711,7 +718,8 @@ category.
 | `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
 | `/ticket reopen` | Support role or administration; restore previous access permissions |
 | `/ticket claim` | Category support role; exclusively claim an open ticket without changing access |
-| `/ticket release` | Current responsible member only; release the ticket and restore its name |
+| `/ticket release` | Current responsible member or administration; release the ticket |
+| `/ticket emoji [emoji]` | Support role or administration; set a personal Unicode claim marker, or reset to green |
 | `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
 | `/ticket info` | Creator while open, or support; category, creator, dates, staff and closure details |
 | `/ticket link <user>` | Support role or administration; associate a subject without granting access |

@@ -20,6 +20,7 @@ from test_tickets import destination, ticket
         ("removed", "4", "Membre concerné"),
         ("linked", "4", "Utilisateur concerné"),
         ("renamed", "support-rp", "Nouveau nom"),
+        ("released", "4", "Ancien responsable"),
     ],
 )
 def test_ticket_log_uses_named_fields_timestamp_bot_footer_and_creator_avatar(action, detail, target_field):

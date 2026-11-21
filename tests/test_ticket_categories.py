@@ -93,7 +93,7 @@ def test_category_rename_refreshes_opening_messages_topics_and_every_panel(monke
         assert embed.title == "⚖️ Ticket #0001 — Médiation"
         assert draft.welcome in embed.description and embed.footer.text == "Aurum"
         assert welcome.edit.await_args.kwargs["allowed_mentions"].to_dict()["parse"] == []
-        assert env.current.edit.await_args.kwargs["topic"] == "Aurum | Médiation | 2"
+        assert next(call.kwargs["topic"] for call in env.current.edit.await_args_list if "topic" in call.kwargs) == "Aurum | Médiation | 2"
         for message in messages:
             options = message.edit.await_args.kwargs["view"].children[0].options
             assert options[0].label == "Médiation" and str(options[0].emoji) == "⚖️"

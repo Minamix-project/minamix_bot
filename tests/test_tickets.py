@@ -255,6 +255,8 @@ def install_session(monkeypatch, session, *, fail_commit=False):
         session.category = AsyncMock(side_effect=lambda key, **kwargs: category_record(key, staff_role_ids=(5,)))
     if not hasattr(session, "categories"):
         session.categories = AsyncMock(return_value=[category_record(key) for key in store.CATEGORY_OPTIONS])
+    if not hasattr(session, "set_channel_base_name"):
+        session.set_channel_base_name = AsyncMock()
     if not hasattr(session, "set_welcome_message"):
         session.set_welcome_message = AsyncMock()
     @asynccontextmanager
@@ -354,6 +356,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "categories",
                 "claim",
                 "release",
+                "emoji",
                 "add",
                 "remove",
                 "rename",
@@ -419,7 +422,7 @@ def test_member_management_reopen_and_subject_link_preserve_access(monkeypatch):
         assert before == service.serialize_overwrites(env.current.overwrites)
         session.link.assert_awaited_once_with(current, env.outsider.id)
         await manager.mutate(env.interaction, "renamed", name="Équipe support")
-        assert env.current.name == "équipe-support"
+        assert env.current.name == "équipe-support-🔴"
         current = replace(current, status="closed", saved_overwrites=json.dumps(before))
         env.current.overwrites = service.archive_overwrites(
             env.guild, env.current.overwrites, (5,), creator_id=env.creator.id
@@ -492,7 +495,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         opened = await manager.create(env.interaction, "report")
         assert opened.status == "open" and opened.creator_id == 2
         assert opened.reference == "0001"
-        assert env.channels[40].name == "ticket-0001"
+        assert env.channels[40].name == "ticket-0001-🔴"
         welcome = env.channels[40].send.await_args
         assert welcome.args[0] == "Bienvenue <@2> !"
         assert "L'équipe de support te répondra prochainement." in welcome.kwargs["embed"].description
@@ -624,7 +627,7 @@ def test_mysql_ticket_lifecycle_concurrency_and_transcript_persistence(monkeypat
         env.interaction.user = env.creator
         restarted = await manager.create(env.interaction, "bot")
         assert restarted.id > opened.id and restarted.reference == "0001"
-        assert env.channels[40].name == "ticket-0001"
+        assert env.channels[40].name == "ticket-0001-🔴"
 
     asyncio.run(scenario())
 
@@ -843,12 +846,13 @@ def test_existing_default_channel_names_are_padded_but_custom_names_are_preserve
         env.current.name = "ticket-1"
         env.panel.name = "rapport-personnalise"
         session = SimpleNamespace(
-            all=AsyncMock(return_value=[ticket(ticket_number=1), ticket(id=2, channel_id=20, ticket_number=2)])
+            all=AsyncMock(return_value=[ticket(ticket_number=1), ticket(id=2, channel_id=20, ticket_number=2)]),
+            get=AsyncMock(side_effect=lambda channel_id: ticket(ticket_number=1) if channel_id == 10 else ticket(id=2, channel_id=20, ticket_number=2))
         )
         install_session(monkeypatch, session)
         await service.TicketService().normalize_channel_names(env.guild)
-        assert env.current.name == "ticket-0001"
-        env.panel.edit.assert_not_awaited()
+        assert env.current.name == "ticket-0001-🔴"
+        assert env.panel.name == "rapport-personnalise-🔴"
 
     asyncio.run(scenario())
 

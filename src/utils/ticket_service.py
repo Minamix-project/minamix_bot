@@ -260,17 +260,51 @@ def opening_embed(bot_user, ticket, category):
     return embed
 
 
-def claimed_channel_name(base_name, guild, user_id, *, member=None):
+def shorten_channel_name(value, limit):
+    while len(value.encode("utf-16-le")) // 2 > limit:
+        value = value[:-1]
+    return value
+
+
+def unclaimed_channel_name(base_name, *, claimable):
+    base = base_name.removesuffix("-🔴")
+    return shorten_channel_name(base, 97) + "-🔴" if claimable else base
+
+
+def claimed_channel_name(base_name, guild, user_id, *, member=None, emoji="🟢"):
     member = member or guild.get_member(user_id)
     label = member.display_name if member else str(user_id)
     label = re.sub(r"[^\w-]+", "-", label.casefold()).strip("-_") or str(user_id)
-    base = base_name[:80]
-    while len(base.encode("utf-16-le")) // 2 > 80:
-        base = base[:-1]
-    name = f"{base}-🟢-{label}"
-    while len(name.encode("utf-16-le")) // 2 > 100:
-        name = name[:-1]
-    return name
+    emoji_length = len(emoji.encode("utf-16-le")) // 2
+    base = shorten_channel_name(base_name.removesuffix("-🔴"), min(80, 100 - emoji_length - 14))
+    return shorten_channel_name(f"{base}-{emoji}-{label}", 100)
+
+
+def ticket_base_name(ticket, channel):
+    if ticket.channel_base_name is not None:
+        return ticket.channel_base_name
+    if ticket.claim_base_name is not None:
+        return ticket.claim_base_name.removesuffix("-🔴")
+    if channel.name in {f"ticket-{ticket.id}", f"ticket-{ticket.ticket_number}"}:
+        return f"ticket-{ticket.reference}"
+    return channel.name.removesuffix("-🔴")
+
+
+def validate_staff_emoji(value):
+    value = value.strip()
+    keycap = "\u20e3" in value
+    def allowed(char):
+        return (unicodedata.category(char) in {"So", "Sk"}
+                or char in {"\u200d", "\ufe0e", "\ufe0f", "\u20e3", "‼", "⁉", "ℹ"}
+                or 0xE0020 <= ord(char) <= 0xE007F or (keycap and char in "0123456789#*"))
+    bases = [char for char in value if unicodedata.category(char) == "So"]
+    flag = len(bases) == 2 and all(0x1F1E6 <= ord(char) <= 0x1F1FF for char in bases)
+    if (not value or len(value.encode("utf-16-le")) // 2 > 32 or not all(allowed(char) for char in value)
+            or not (bases or keycap or any(char in value for char in "‼⁉ℹ"))
+            or (keycap and sum(char in "0123456789#*" for char in value) != 1)
+            or (len(bases) > 1 and "\u200d" not in value and not flag)):
+        raise TicketError("Choisis un seul emoji Unicode, par exemple 🎯. Les emojis personnalisés Discord ne sont pas utilisables dans un nom de salon.")
+    return value
 
 
 def transcript_file(ticket, content):
@@ -422,6 +456,7 @@ class TicketService:
                                    view=TicketCloseView(self, ticket), allowed_mentions=NO_MENTIONS)
                 undo.append(lambda message=message, embeds=old_embeds, view=old_view:
                             message.edit(embeds=embeds, view=view, allowed_mentions=NO_MENTIONS))
+            await self.sync_ticket_name(guild, channel, ticket, session, undo)
             await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id)
 
     async def refresh_opening(self, guild, channel, ticket, session, undo, *, create=False):
@@ -450,10 +485,10 @@ class TicketService:
             if release:
                 if ticket.claimed_by is None:
                     raise TicketError("Ce ticket n'est pas pris en charge.")
-                if ticket.claimed_by != interaction.user.id:
-                    raise TicketError("Seul le responsable actuel peut libérer ce ticket.")
-                name = ticket.claim_base_name or f"ticket-{ticket.reference}"
-                await session.release(ticket, interaction.user.id)
+                if ticket.claimed_by != interaction.user.id and not is_admin(interaction.user):
+                    raise TicketError("Seul le responsable actuel ou un administrateur (Gérer le serveur) peut libérer ce ticket.")
+                base = ticket_base_name(ticket, channel)
+                await session.release(ticket)
             else:
                 if ticket.status != "open":
                     raise TicketError("Ce ticket est fermé. Rouvre-le avant de le prendre en charge.")
@@ -464,17 +499,30 @@ class TicketService:
                 if not set(roles).intersection(role.id for role in interaction.user.roles):
                     raise TicketError("Tu dois avoir l'un des rôles de support de cette catégorie pour prendre en charge ce ticket.")
                 if ticket.claimed_by is not None:
-                    raise TicketError(f"Ce ticket est déjà pris en charge par <@{ticket.claimed_by}>. Seule cette personne peut le libérer.")
-                name = claimed_channel_name(channel.name, interaction.guild, interaction.user.id, member=interaction.user)
-                await session.claim(ticket, interaction.user.id, channel.name)
+                    raise TicketError(f"Ce ticket est déjà pris en charge par <@{ticket.claimed_by}>. Son responsable ou un administrateur peut le libérer.")
+                base = ticket_base_name(ticket, channel)
+                await session.claim(ticket, interaction.user.id, base)
+            previous_owner = ticket.claimed_by
+            ticket = await session.get(channel.id)
+            if release:
+                name = unclaimed_channel_name(base, claimable=ticket.status == "open" and ticket.claim_enabled)
+            else:
+                name = claimed_channel_name(base, interaction.guild, interaction.user.id,
+                                            member=interaction.user, emoji=ticket.claim_emoji)
+            if ticket.channel_base_name is None:
+                await session.set_channel_base_name(ticket, base)
             old_name = channel.name
             await channel.edit(name=name, reason="Libération du ticket" if release else "Prise en charge du ticket")
             undo.append(lambda: channel.edit(name=old_name))
             ticket = await session.get(channel.id)
             action = "released" if release else "claimed"
-            await session.event(ticket, interaction.user.id, action, staff=True)
+            if release:
+                await session.event(ticket, interaction.user.id, action, str(previous_owner), staff=True)
+            else:
+                await session.event(ticket, interaction.user.id, action, staff=True)
             await self.refresh_opening(interaction.guild, channel, ticket, session, undo, create=True)
-        await self.log_action(interaction.guild, ticket, action, interaction.user.id)
+        await self.log_action(interaction.guild, ticket, action, interaction.user.id,
+                              detail=str(previous_owner) if release else None)
         return ticket
 
     async def save_category(self, interaction, draft, view_factory):
@@ -714,8 +762,9 @@ class TicketService:
             if len(destination.channels) >= 50:
                 raise TicketError("La catégorie de support est pleine. Contacte le personnel.")
             number = await session.next_number()
+            base_name = f"ticket-{number:04d}"
             channel = await guild.create_text_channel(
-                f"ticket-{number:04d}",
+                unclaimed_channel_name(base_name, claimable=bool(option["claim_enabled"])),
                 category=destination,
                 overwrites=private_overwrites(guild, creator, staff_roles),
                 topic=f"Aurum | {option['name']} | {creator.id}",
@@ -723,7 +772,8 @@ class TicketService:
             )
             undo.append(channel.delete)
             await session.create(channel.id, creator.id, category, panel, number=number,
-                                 staff_role_ids=option["staff_role_ids"], category_version=option["version"])
+                                 staff_role_ids=option["staff_role_ids"], category_version=option["version"],
+                                 channel_base_name=base_name)
             ticket = await session.get(channel.id)
             await session.event(
                 ticket,
@@ -840,9 +890,12 @@ class TicketService:
                             "Le nom doit contenir entre 1 et 90 caractères (lettres, chiffres ou tirets)."
                         )
                     old_name = channel.name
+                    await session.set_channel_base_name(ticket, name)
                     if ticket.claimed_by is not None:
                         await session.set_claim_base_name(ticket, name)
-                        name = claimed_channel_name(name, interaction.guild, ticket.claimed_by)
+                        name = claimed_channel_name(name, interaction.guild, ticket.claimed_by, emoji=ticket.claim_emoji)
+                    else:
+                        name = unclaimed_channel_name(name, claimable=ticket.claim_enabled)
                     await channel.edit(name=name, reason="Renommage du ticket")
                     undo.append(lambda: channel.edit(name=old_name))
                     detail = name
@@ -856,6 +909,7 @@ class TicketService:
             ticket = await session.get(channel.id)
             await session.event(ticket, interaction.user.id, action, detail, staff=staff)
             if action in {"closed", "reopened"}:
+                await self.sync_ticket_name(interaction.guild, channel, ticket, session, undo)
                 await self.refresh_opening(interaction.guild, channel, ticket, session, undo)
             if action == "closed":
                 content = await build_transcript(channel, ticket, session)
@@ -897,20 +951,53 @@ class TicketService:
             except discord.HTTPException:
                 logger.warning("Could not refresh ticket panel guild=%s panel=%s", guild.id, panel["id"])
 
+    async def sync_ticket_name(self, guild, channel, ticket, session, undo):
+        base = ticket_base_name(ticket, channel)
+        if ticket.claimed_by is not None:
+            name = claimed_channel_name(base, guild, ticket.claimed_by, emoji=ticket.claim_emoji)
+        else:
+            name = unclaimed_channel_name(base, claimable=ticket.status == "open" and ticket.claim_enabled)
+        if name != channel.name:
+            old = channel.name
+            await channel.edit(name=name, reason="Mise à jour de l'état de prise en charge du ticket")
+            undo.append(lambda: channel.edit(name=old))
+        if ticket.channel_base_name is None:
+            await session.set_channel_base_name(ticket, base)
+
+    async def set_staff_emoji(self, interaction, emoji):
+        emoji = validate_staff_emoji(emoji) if emoji is not None else None
+        async with operation(interaction.guild_id) as (session, undo):
+            categories = await session.categories()
+            if not is_admin(interaction.user) and not any(
+                set(category["staff_role_ids"]).intersection(role.id for role in interaction.user.roles)
+                for category in categories
+            ):
+                raise TicketError("Cette commande est réservée au personnel de support et à l'administration.")
+            await session.set_staff_emoji(interaction.user.id, emoji)
+            for ticket in await session.for_claimant(interaction.user.id):
+                channel = interaction.guild.get_channel(ticket.channel_id)
+                if channel is not None:
+                    await self.sync_ticket_name(interaction.guild, channel, ticket, session, undo)
+            await session.execute(
+                "INSERT INTO admin_audit (guild_id, actor_id, action) VALUES (%s, %s, %s)",
+                (interaction.guild_id, interaction.user.id, "ticket.emoji: updated" if emoji else "ticket.emoji: reset"),
+            )
+        return emoji or "🟢"
+
     async def normalize_channel_names(self, guild):
         async with ticket_session(guild.id) as session:
             tickets = await session.all()
         for ticket in tickets:
             channel = guild.get_channel(ticket.channel_id)
-            if channel and channel.name in {f"ticket-{ticket.id}", f"ticket-{ticket.ticket_number}"}:
-                try:
-                    await channel.edit(
-                        name=f"ticket-{ticket.reference}", reason="Mise au format des numéros de tickets"
-                    )
-                except discord.HTTPException:
-                    logger.warning(
-                        "Could not normalize ticket channel guild=%s channel=%s", guild.id, ticket.channel_id
-                    )
+            if channel is None:
+                continue
+            try:
+                async with operation(guild.id) as (session, undo):
+                    current = await session.get(ticket.channel_id)
+                    if current:
+                        await self.sync_ticket_name(guild, channel, current, session, undo)
+            except (TicketError, discord.HTTPException):
+                logger.warning("Could not normalize ticket channel guild=%s channel=%s", guild.id, ticket.channel_id)
 
     async def purge_preview(self, interaction):
         if not is_admin(interaction.user):
