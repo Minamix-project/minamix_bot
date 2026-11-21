@@ -27,6 +27,7 @@ def ticket(**changes):
 def destination():
     guild = Mock(spec=discord.Guild)
     guild.id, guild.filesize_limit = 1, 10 * 1024 * 1024
+    guild.roles = []
     everyone = Mock(spec=discord.Role)
     everyone.id, everyone.guild = 1, guild
     staff_role = Mock(spec=discord.Role)
@@ -175,12 +176,12 @@ def test_private_overwrites_ignore_category_and_archive_restores_all_access(crea
         original[env.outsider] = service.member_overwrite()
         original[env.staff] = service.member_overwrite()
         closed = service.archive_overwrites(env.guild, original, (5,), creator_id=env.creator.id)
-        assert closed[env.creator].view_channel is False
+        assert closed[env.creator].view_channel is creator_has_support_role
         assert closed[env.outsider].view_channel is False
         assert closed[env.staff_role].view_channel is True
         assert closed[env.staff].view_channel is True
         assert closed[env.guild.me].view_channel is True
-        assert closed[env.creator].send_messages is False
+        assert closed[env.creator].send_messages is creator_has_support_role
         assert closed[env.staff_role].send_messages_in_threads is False
         assert closed[env.guild.me].send_messages is True
         assert original[env.creator].send_messages is True
@@ -320,7 +321,7 @@ def test_failed_closure_restores_permissions(monkeypatch, failure):
         with pytest.raises((store.TicketError, RuntimeError)):
             await service.TicketService().mutate(env.interaction, "closed", reason="Résolu")
         assert service.serialize_overwrites(env.current.overwrites) == original
-        assert env.current.edit.await_count == 2
+        assert sum("overwrites" in call.kwargs for call in env.current.edit.await_args_list) == 2
 
     asyncio.run(scenario())
 
@@ -362,6 +363,7 @@ def test_registered_ticket_group_is_public_but_setup_checks_admin_and_view_persi
                 "rename",
                 "close",
                 "reopen",
+                "delete",
                 "transcript",
                 "link",
                 "info",

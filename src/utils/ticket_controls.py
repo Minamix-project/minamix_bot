@@ -1,4 +1,4 @@
-"""Persistent ticket claiming and creator-only closing controls."""
+"""Persistent ticket controls with private, authorized deletion confirmation."""
 
 import discord
 
@@ -20,6 +20,11 @@ class TicketCloseView(discord.ui.View):
         if ticket is not None:
             self.close.disabled = ticket.status != "open"
             self.claim.disabled = ticket.status != "open" or ticket.claimed_by is not None
+            if ticket.status != "closed":
+                self.remove_item(self.reopen)
+            else:
+                self.remove_item(self.close)
+                self.remove_item(self.claim)
             if not ticket.claim_enabled:
                 self.remove_item(self.claim)
             if ticket.claimed_by is None:
@@ -57,6 +62,21 @@ class TicketCloseView(discord.ui.View):
     async def release(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.assignment(interaction, release=True)
 
+    @discord.ui.button(
+        label="Rouvrir le ticket", emoji="🔓", style=discord.ButtonStyle.success, custom_id="aurum:tickets:reopen:v1",
+    )
+    async def reopen(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.service.mutate(interaction, "reopened")
+        await interaction.followup.send("✅ Ticket rouvert ; les accès ont été restaurés.", ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+
+    @discord.ui.button(
+        label="Supprimer le ticket", emoji="🗑️", style=discord.ButtonStyle.danger, custom_id="aurum:tickets:delete:v1",
+    )
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await show_delete_confirmation(self.service, interaction)
+
     async def assignment(self, interaction, *, release):
         await interaction.response.defer(ephemeral=True, thinking=True)
         await self.service.assign(interaction, release=release)
@@ -81,6 +101,65 @@ def previous_ticket_controls(service, message):
         else:
             item.disabled = buttons[item.custom_id]
     return view
+
+
+async def show_delete_confirmation(service, interaction):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    ticket = await service.deletion_preview(interaction)
+    embed = ticket_embed(
+        interaction.client.user, title=f"Supprimer le ticket #{ticket.reference} ?",
+        description="Le salon sera supprimé définitivement. S'il est ouvert, il sera d'abord fermé.\n\n"
+        "Un transcript à jour sera sauvegardé ; les archives, l'historique et le compteur des tickets seront conservés.\n\n"
+        "**Cette action est irréversible.**",
+    )
+    embed.color = discord.Color.red()
+    view = TicketDeleteConfirmation(service, interaction.user.id, ticket.guild_id, ticket.channel_id, ticket.id)
+    view.message = await interaction.followup.send(embed=embed, view=view, ephemeral=True, wait=True,
+                                                  allowed_mentions=discord.AllowedMentions.none())
+
+
+class TicketDeleteConfirmation(ExpiringView):
+    def __init__(self, service, actor_id, guild_id, channel_id, ticket_id):
+        super().__init__(timeout=60, owner_id=actor_id)
+        self.service, self.guild_id, self.channel_id, self.ticket_id = service, guild_id, channel_id, ticket_id
+        self.used = False
+
+    async def interaction_check(self, interaction):
+        if not await super().interaction_check(interaction):
+            return False
+        if (interaction.guild_id not in GUILD_IDS or interaction.guild_id != self.guild_id
+                or interaction.channel_id != self.channel_id or self.used or self.is_finished()):
+            await interaction.response.send_message("❌ Cette confirmation n'est plus disponible pour ce ticket.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.interaction_check(interaction):
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(content="⏳ Sauvegarde puis suppression du ticket…", embed=None, view=None)
+        _ticket, warning = await self.service.delete(interaction, self.ticket_id)
+        try:
+            await interaction.edit_original_response(
+                content="✅ Ticket supprimé ; les archives sont conservées." + ("\n" + warning if warning else ""),
+                embed=None, view=None, allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.NotFound:
+            # The ephemeral confirmation can disappear with its deleted channel.
+            pass
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.interaction_check(interaction):
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(content="✅ Suppression annulée.", embed=None, view=None)
+
+    async def on_error(self, interaction, error, item):
+        await send_error(interaction, error)
 
 
 class TicketCloseConfirmation(ExpiringView):

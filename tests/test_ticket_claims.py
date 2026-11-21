@@ -97,8 +97,8 @@ def test_claim_is_exclusive_and_owner_release_restores_the_original_name_without
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("identity", ["creator", "admin", "outsider"])
-def test_members_without_a_category_role_cannot_claim_even_with_admin_permissions(monkeypatch, identity):
+@pytest.mark.parametrize("identity", ["creator", "outsider"])
+def test_regular_members_without_a_category_role_cannot_claim(monkeypatch, identity):
     async def scenario():
         env, _state, session, message = assignment(monkeypatch)
         env.interaction.user = getattr(env, identity)
@@ -125,7 +125,7 @@ def test_claim_permissions_follow_current_category_roles_instead_of_stale_ticket
     async def scenario():
         env, _state, session, _message = assignment(monkeypatch)
         session.category.return_value = category_record(staff_role_ids=(6,))
-        with pytest.raises(store.TicketError, match="rôles de support"):
+        with pytest.raises(store.TicketError, match="rôle de support"):
             await service.TicketService().assign(env.interaction)
         session.claim.assert_not_awaited()
     asyncio.run(scenario())
@@ -139,7 +139,7 @@ def test_owner_can_release_after_claiming_is_disabled_and_others_cannot(monkeypa
         assert view.claim not in view.children and view.release in view.children
         assert view.close.disabled
         await service.TicketService().assign(env.interaction, release=True)
-        assert env.current.name == "rapport-personnalisé"
+        assert env.current.name == "rapport-personnalisé-🔒"
     asyncio.run(scenario())
 
 
@@ -359,7 +359,7 @@ def test_mysql_claim_migration_enables_existing_categories_and_preserves_existin
                 await init_db(db)
                 async with db.cursor() as cursor:
                     await cursor.execute("SELECT claim_enabled, version, name FROM ticket_categories WHERE guild_id = 1")
-                    assert await cursor.fetchone() == (1, 8 if migration_cutoff == "0019" else 7, "Médiation")
+                    assert await cursor.fetchone() == (1, 9 if migration_cutoff == "0019" else 8, "Médiation")
                     await cursor.execute(
                         "SELECT claimed_by, claimed_at, claim_base_name, category_version, ticket_number, channel_base_name FROM tickets"
                     )

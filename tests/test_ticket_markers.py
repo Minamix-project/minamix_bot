@@ -74,8 +74,8 @@ def test_regular_members_cannot_set_staff_emojis_and_failed_saves_restore_channe
 
 @pytest.mark.parametrize("status,enabled,claimed,expected", [
     ("open", True, None, "rapport-🔴"), ("open", False, None, "rapport"),
-    ("closed", True, None, "rapport"), ("closed", False, None, "rapport"),
-    ("open", True, 3, "rapport-🎯-member-3"), ("closed", False, 3, "rapport-🎯-member-3"),
+    ("closed", True, None, "rapport-🔒"), ("closed", False, None, "rapport-🔒"),
+    ("open", True, 3, "rapport-🎯-member-3"), ("closed", False, 3, "rapport-🎯-member-3-🔒"),
 ])
 def test_pending_marker_only_appears_for_unclaimed_open_claimable_tickets(monkeypatch, status, enabled, claimed, expected):
     async def scenario():
@@ -215,7 +215,7 @@ def test_mysql_markers_preferences_and_admin_release_are_persistent_and_guild_sc
         await manager.save_category(env.interaction, draft, lambda: command.TicketPanel(manager))
         assert channel.name == "support-rp-🔴"
         await manager.mutate(env.interaction, "closed", reason="Résolu")
-        assert channel.name == "support-rp"
+        assert channel.name == "support-rp-🔒"
         await manager.mutate(env.interaction, "reopened")
         assert channel.name == "support-rp-🔴"
 

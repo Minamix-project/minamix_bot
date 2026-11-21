@@ -133,10 +133,12 @@ class Ticket:
     claim_base_name: str | None = None
     channel_base_name: str | None = None
     claim_emoji: str = "🟢"
+    admin_role_ids: tuple[int, ...] = ()
 
     @classmethod
     def from_row(cls, row):
-        return cls(**{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))})
+        return cls(**{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"])),
+                      "admin_role_ids": tuple(json.loads(row.get("admin_role_ids") or "[]"))})
 
     @property
     def reference(self):
@@ -341,12 +343,12 @@ class TicketSession:
             "t.guild_id = %s AND t.category = %s ORDER BY t.id", (self.guild_id, key),
         )
 
-    async def update_category(self, ticket, category, saved_overwrites, welcome_message_id):
+    async def update_category(self, ticket, category, saved_overwrites, welcome_message_id, *, admin_role_ids=()):
         await self.execute(
             "UPDATE tickets SET staff_role_ids = %s, saved_overwrites = %s, category_version = %s, "
-            "welcome_message_id = %s WHERE guild_id = %s AND id = %s",
+            "welcome_message_id = %s, admin_role_ids = %s WHERE guild_id = %s AND id = %s",
             (json.dumps(list(category["staff_role_ids"])), saved_overwrites, category["version"],
-             welcome_message_id, self.guild_id, ticket.id),
+             welcome_message_id, json.dumps(list(admin_role_ids)), self.guild_id, ticket.id),
         )
 
     async def set_welcome_message(self, ticket, message_id):
@@ -378,13 +380,13 @@ class TicketSession:
         )
 
     async def create(self, channel_id, creator_id, category, panel, *, number=None, staff_role_ids=(), category_version=0,
-                     channel_base_name=None):
+                     channel_base_name=None, admin_role_ids=()):
         if number is None:
             number = await self.next_number()
         return await self.execute(
             "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, "
-            "logs_channel_id, ticket_number, panel_id, category_version, channel_base_name, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            "logs_channel_id, ticket_number, panel_id, category_version, channel_base_name, admin_role_ids, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
             (
                 self.guild_id,
                 channel_id,
@@ -397,6 +399,7 @@ class TicketSession:
                 panel.get("id"),
                 category_version,
                 channel_base_name,
+                json.dumps(list(admin_role_ids)),
             ),
         )
 
@@ -456,6 +459,11 @@ class TicketSession:
             "close_reason = NULL, saved_overwrites = NULL WHERE id = %s AND guild_id = %s",
             (ticket.id, self.guild_id),
         )
+
+    async def delete(self, ticket):
+        # Retain events and transcripts; only a full purge removes archives.
+        await self.execute("UPDATE tickets SET status = 'deleted' WHERE id = %s AND guild_id = %s",
+                           (ticket.id, self.guild_id))
 
     async def link(self, ticket, subject_id):
         await self.execute(
@@ -535,7 +543,7 @@ async def record_staff_message(guild_id, channel_id, member):
     try:
         async with db.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, staff_role_ids FROM tickets WHERE guild_id = %s AND channel_id = %s AND status = 'open'",
+                "SELECT id, staff_role_ids FROM tickets WHERE guild_id = %s AND channel_id = %s AND status IN ('open', 'closed')",
                 (guild_id, channel_id),
             )
             row = await cursor.fetchone()

@@ -640,8 +640,8 @@ preserved.
 
 **Prise en charge** is enabled by default for every existing and new category.
 The category editor can toggle it before saving. Members holding one of that
-category's support roles can use **Prendre en charge** or `/ticket claim` in an
-open ticket. Administrator permissions alone do not grant claim eligibility.
+category's support roles, or members with Administrator or Manage Server, can
+use **Prendre en charge** or `/ticket claim` in an open ticket.
 Only one person can claim a ticket; concurrent requests are serialized and
 guarded in MySQL. Claiming does not modify channel access or other staff powers.
 
@@ -680,7 +680,7 @@ If every category is deleted, public menus are disabled until another is created
 Saving a category updates every public panel menu and all its existing ticket
 channels, including tickets whose panel was deleted. It changes channel topics,
 opening embeds and support permissions while preserving ticket numbers and
-explicit creator/guest access. Closed tickets remain private and read-only;
+explicit creator/guest access. Closed tickets remain private and writable by support and administration;
 their saved reopening permissions receive the same role changes. Initial
 messages are tracked by ID; older ones are recovered among the first 50 messages
 when possible. Deleted opening messages are left deleted. Historical transcript
@@ -717,7 +717,8 @@ category.
 | `/ticket rename <name>` | Support role or administration; rename the current ticket |
 | `/ticket close <reason>` | Creator or support; remove participant access and save a transcript |
 | `/ticket reopen` | Support role or administration; restore previous access permissions |
-| `/ticket claim` | Category support role; exclusively claim an open ticket without changing access |
+| `/ticket delete` | Support role or administration; confirm channel deletion while retaining archives |
+| `/ticket claim` | Category support role or administration; exclusively claim an open ticket without changing access |
 | `/ticket release` | Current responsible member or administration; release the ticket |
 | `/ticket emoji [emoji]` | Support role or administration; set a personal Unicode claim marker, or reset to green |
 | `/ticket transcript` | Creator while open, or support; private UTF-8 text file, saved in MySQL |
@@ -737,10 +738,20 @@ ticket event history, which preserves previous close/reopen cycles. Use
 `/audit commande:ticket` to filter these actions and `/config` to inspect the panels. Staff who
 send messages or perform actions are recorded separately.
 
-Closing retains the channel for staff review, removes visibility for the creator
-and added members, saves their previous permissions, and makes the remaining staff
-access read-only. Staff-role access and the bot's permissions are retained; Discord
-administrators still bypass overwrites. The bot saves the transcript and optionally
+Closing retains the channel for staff review, removes visibility for ordinary
+creators and invited members, and saves their previous permissions. Members with
+category support roles or administration permissions retain reading, writing and
+application command access, including when they created the ticket themselves.
+Closed channel names end in `-🔒`, after the responsible member's marker and name
+if assigned. The opening embed also indicates closure and offers **Rouvrir le
+ticket** and **Supprimer le ticket** buttons. Reopening removes the lock and
+restores the usual availability or assignment marker.
+
+Roles with Administrator or Manage Server receive explicit access on new and
+existing tickets without being added to category support roles. These grants
+and the saved reopening permissions are synchronized at startup and when the
+roles gain or lose those permissions; revoked managed role grants are removed.
+This also covers tickets whose help category was deleted. The bot saves the transcript and optionally
 uploads it to the private transcript channel. If transcript delivery fails, the saved transcript
 remains available through `transcript`. Reopening by staff restores the saved permissions for the creator and previously added members;
 a second open ticket for the same creator and help category prevents reopening.
@@ -754,13 +765,29 @@ inventing a transcript; previously stored exports remain in the database.
 Transcripts include available messages in chronological order, author/message
 IDs, timestamps, replies, embed text, attachment links, ticket metadata and action
 history. They do not include deleted messages, past edits, thread histories or
-attachment binaries; Discord attachment URLs may expire. A closed ticket exports
-its closing snapshot; an open ticket creates a fresh snapshot. Exports are capped
+attachment binaries; Discord attachment URLs may expire. Both open and closed
+tickets create a fresh snapshot when exported, including staff messages written
+after closure. Previous snapshots remain archived. Exports are capped
 at 20,000 messages and the smaller of 8 MiB or the server upload limit. Exceeding
 a limit or failing to read history aborts closure and restores permissions, with
 no silently truncated transcript. Records and transcripts remain in MySQL until
 removed by an administrator with `/ticket purge` or through database maintenance and are covered by the
 normal database backups. No administrative web interface is introduced.
+
+`/ticket delete` and **Supprimer le ticket** use the same private, single-use
+confirmation, expiring after 60 seconds. Only category support staff or members
+with Administrator or Manage Server may confirm; authority and ticket identity
+are checked again when executing. Open tickets are first closed and archived.
+A current transcript is committed before deleting the Discord channel and is
+sent to the configured transcript destination when available. A failed archive
+prevents deletion; a Discord deletion failure leaves the ticket closed and
+retryable. The ticket record, events, staff history, transcripts and sequence are
+retained; a successful deletion is recorded in ticket logs and the audit journal.
+Deleting a single ticket never resets numbering. A database failure after Discord
+deletes the channel can leave its record closed, but the committed archive is
+preserved. Channels hosting panels or receiving transcripts or ticket logs must
+be moved out of those configurations before deletion. Full archive erasure and
+numbering reset remain restricted to `/ticket purge`.
 
 
 Run `/ticket purge` outside a ticket channel. Its private confirmation expires

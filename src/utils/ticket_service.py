@@ -39,11 +39,18 @@ EVENT_LABELS = {
     "panel": "Configuration du panneau",
     "claimed": "Prise en charge",
     "released": "Libération",
+    "deleted": "Suppression du salon",
+    "deletion_requested": "Suppression demandée",
 }
 
 
 def is_staff(member, staff_role_ids):
     return is_admin(member) or bool(set(staff_role_ids).intersection(role.id for role in getattr(member, "roles", ())))
+
+
+def admin_roles(guild):
+    return [role for role in guild.roles if not role.is_default()
+            and (role.permissions.administrator or role.permissions.manage_guild)]
 
 
 def require_ticket_channel(interaction, ticket):
@@ -136,6 +143,7 @@ def private_overwrites(guild, member, staff_roles):
             manage_roles=True,
         ),
         **{role: member_overwrite() for role in staff_roles},
+        **{role: member_overwrite() for role in admin_roles(guild)},
         member: member_overwrite(),
     }
 
@@ -177,10 +185,13 @@ def archive_overwrites(guild, overwrites, staff_role_ids, *, creator_id):
             staff_target = (
                 target.id in staff_role_ids if isinstance(target, discord.Role) else is_staff(target, staff_role_ids)
             )
-            if not staff_target or target.id == creator_id:
-                copy.view_channel = False
+            if isinstance(target, discord.Role) and target in admin_roles(guild):
+                staff_target = True
+            copy.view_channel = bool(staff_target)
             copy.update(
-                send_messages=False,
+                send_messages=bool(staff_target),
+                read_message_history=True if staff_target else copy.read_message_history,
+                use_application_commands=True if staff_target else copy.use_application_commands,
                 send_messages_in_threads=False,
                 create_public_threads=False,
                 create_private_threads=False,
@@ -193,7 +204,7 @@ def archive_overwrites(guild, overwrites, staff_role_ids, *, creator_id):
 def replace_staff_overwrites(guild, ticket, overwrites, staff_roles):
     """Replace managed role grants while retaining explicit participant access."""
     new_ids = {role.id for role in staff_roles}
-    removed_ids = set(ticket.staff_role_ids) - new_ids
+    removed_ids = (set(ticket.staff_role_ids) | set(ticket.admin_role_ids)) - new_ids
     updated = {
         target: discord.PermissionOverwrite.from_pair(*overwrite.pair())
         for target, overwrite in overwrites.items()
@@ -206,11 +217,11 @@ def replace_staff_overwrites(guild, ticket, overwrites, staff_roles):
     for target, overwrite in updated.items():
         if (
             isinstance(target, discord.Member)
-            and target.id not in {ticket.creator_id, guild.me.id}
+            and target.id != guild.me.id
             and is_staff(target, new_ids)
         ):
             # A former guest's explicit removal must not block new support access.
-            overwrite.view_channel = True
+            overwrite.update(view_channel=True, send_messages=True, read_message_history=True, use_application_commands=True)
     if ticket.status == "closed":
         updated = archive_overwrites(guild, updated, new_ids, creator_id=ticket.creator_id)
     return updated
@@ -222,7 +233,7 @@ def replace_saved_staff(guild, ticket, staff_roles):
         return None
     retained = [
         entry for entry in json.loads(ticket.saved_overwrites)
-        if not (entry["type"] == "role" and entry["id"] in ticket.staff_role_ids)
+        if not (entry["type"] == "role" and entry["id"] in {*ticket.staff_role_ids, *ticket.admin_role_ids})
     ]
     new_ids = {role.id for role in staff_roles}
     retained = [entry for entry in retained if not (entry["type"] == "role" and entry["id"] in new_ids)]
@@ -247,6 +258,10 @@ def opening_embed(bot_user, ticket, category):
         "Pour fermer ce ticket, appuie sur le bouton **Fermer le ticket**.",
     )
     embed.add_field(name="Historique", value="Un transcript sera conservé à la fermeture.", inline=False)
+    if ticket.status == "closed":
+        embed.color = discord.Color.red()
+        embed.description = "🔒 **Ce ticket est fermé.** Le personnel peut le rouvrir ou le supprimer avec les boutons ci-dessous."
+        embed.add_field(name="État", value="🔒 Fermé", inline=False)
     if ticket.claimed_by is not None:
         value = f"<@{ticket.claimed_by}>"
         if ticket.claimed_at:
@@ -280,6 +295,15 @@ def claimed_channel_name(base_name, guild, user_id, *, member=None, emoji="🟢"
     return shorten_channel_name(f"{base}-{emoji}-{label}", 100)
 
 
+def ticket_channel_name(ticket, guild, base, *, member=None):
+    if ticket.claimed_by is not None:
+        # Reserve room for the closure marker without dropping the member's name.
+        name = claimed_channel_name(base, guild, ticket.claimed_by, member=member, emoji=ticket.claim_emoji)
+    else:
+        name = unclaimed_channel_name(base, claimable=ticket.status == "open" and ticket.claim_enabled)
+    return shorten_channel_name(name, 97) + "-🔒" if ticket.status == "closed" else name
+
+
 def ticket_base_name(ticket, channel):
     if ticket.channel_base_name is not None:
         return ticket.channel_base_name
@@ -287,7 +311,7 @@ def ticket_base_name(ticket, channel):
         return ticket.claim_base_name.removesuffix("-🔴")
     if channel.name in {f"ticket-{ticket.id}", f"ticket-{ticket.ticket_number}"}:
         return f"ticket-{ticket.reference}"
-    return channel.name.removesuffix("-🔴")
+    return channel.name.removesuffix("-🔒").removesuffix("-🔴")
 
 
 def validate_staff_emoji(value):
@@ -425,9 +449,15 @@ class TicketService:
     async def sync_category_tickets(self, guild, category, session, undo):
         staff_roles = [guild.get_role(role_id) for role_id in category["staff_role_ids"]]
         validate_staff_roles(guild, staff_roles)
+        administrators = admin_roles(guild)
+        management_roles = list({role.id: role for role in [*staff_roles, *administrators]}.values())
         plans = []
         for ticket in await session.for_category(category["category_key"]):
-            if ticket.category_version == category["version"] and set(ticket.staff_role_ids) == set(category["staff_role_ids"]):
+            if ticket.status == "deleted":
+                continue
+            if (ticket.category_version == category["version"]
+                    and set(ticket.staff_role_ids) == set(category["staff_role_ids"])
+                    and set(ticket.admin_role_ids) == {role.id for role in administrators}):
                 continue
             channel = guild.get_channel(ticket.channel_id)
             if channel is None:
@@ -442,8 +472,8 @@ class TicketService:
                 raise TicketError(f"Le bot doit pouvoir gérer le salon et les permissions du ticket #{ticket.reference}.")
             message = await self.welcome_message(guild, channel, ticket)
             old = channel.overwrites
-            plans.append((ticket, channel, old, replace_staff_overwrites(guild, ticket, old, staff_roles),
-                          replace_saved_staff(guild, ticket, staff_roles), message))
+            plans.append((ticket, channel, old, replace_staff_overwrites(guild, ticket, old, management_roles),
+                          replace_saved_staff(guild, ticket, management_roles), message))
         for ticket, channel, old, updated, saved, message in plans:
             old_topic = channel.topic
             await channel.edit(overwrites=updated, topic=f"Aurum | {category['name']} | {ticket.creator_id}",
@@ -457,7 +487,8 @@ class TicketService:
                 undo.append(lambda message=message, embeds=old_embeds, view=old_view:
                             message.edit(embeds=embeds, view=view, allowed_mentions=NO_MENTIONS))
             await self.sync_ticket_name(guild, channel, ticket, session, undo)
-            await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id)
+            await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id,
+                                          admin_role_ids=tuple(role.id for role in administrators))
 
     async def refresh_opening(self, guild, channel, ticket, session, undo, *, create=False):
         message = await self.welcome_message(guild, channel, ticket)
@@ -496,19 +527,15 @@ class TicketService:
                     raise TicketError("La prise en charge est désactivée pour cette catégorie.")
                 category = await session.category(ticket.category, include_inactive=True)
                 roles = category["staff_role_ids"] if category else ticket.staff_role_ids
-                if not set(roles).intersection(role.id for role in interaction.user.roles):
-                    raise TicketError("Tu dois avoir l'un des rôles de support de cette catégorie pour prendre en charge ce ticket.")
+                if not is_staff(interaction.user, roles):
+                    raise TicketError("Tu dois avoir un rôle de support de cette catégorie ou Gérer le serveur pour prendre en charge ce ticket.")
                 if ticket.claimed_by is not None:
                     raise TicketError(f"Ce ticket est déjà pris en charge par <@{ticket.claimed_by}>. Son responsable ou un administrateur peut le libérer.")
                 base = ticket_base_name(ticket, channel)
                 await session.claim(ticket, interaction.user.id, base)
             previous_owner = ticket.claimed_by
             ticket = await session.get(channel.id)
-            if release:
-                name = unclaimed_channel_name(base, claimable=ticket.status == "open" and ticket.claim_enabled)
-            else:
-                name = claimed_channel_name(base, interaction.guild, interaction.user.id,
-                                            member=interaction.user, emoji=ticket.claim_emoji)
+            name = ticket_channel_name(ticket, interaction.guild, base, member=interaction.user if not release else None)
             if ticket.channel_base_name is None:
                 await session.set_channel_base_name(ticket, base)
             old_name = channel.name
@@ -600,10 +627,17 @@ class TicketService:
     async def sync_categories(self, guild):
         async with ticket_session(guild.id) as session:
             categories = await session.categories()
+            known_keys = {category["category_key"] for category in categories}
+            for ticket in await session.all():
+                if ticket.category not in known_keys:
+                    category = await session.category(ticket.category, include_inactive=True)
+                    if category:
+                        categories.append(category)
+                    known_keys.add(ticket.category)
         for category in categories:
             try:
                 async with operation(guild.id) as (session, undo):
-                    current = await session.category(category["category_key"])
+                    current = await session.category(category["category_key"], include_inactive=True)
                     await self.sync_category_tickets(guild, current, session, undo)
             except (TicketError, discord.HTTPException):
                 logger.warning("Could not synchronize ticket category guild=%s category=%s", guild.id, category["category_key"])
@@ -773,7 +807,7 @@ class TicketService:
             undo.append(channel.delete)
             await session.create(channel.id, creator.id, category, panel, number=number,
                                  staff_role_ids=option["staff_role_ids"], category_version=option["version"],
-                                 channel_base_name=base_name)
+                                 channel_base_name=base_name, admin_role_ids=tuple(role.id for role in admin_roles(guild)))
             ticket = await session.get(channel.id)
             await session.event(
                 ticket,
@@ -817,6 +851,8 @@ class TicketService:
         async with operation(interaction.guild_id) as (session, undo):
             ticket = await session.get(interaction.channel_id)
             staff = require_access(interaction, ticket, staff_only=action != "closed")
+            if expected_ticket_id is not None and ticket.id != expected_ticket_id:
+                raise TicketError("Ce ticket ne correspond plus à la confirmation. Relance la commande.")
             if creator_only:
                 if action != "closed":
                     raise ValueError("Creator-only mutation must close a ticket")
@@ -921,15 +957,70 @@ class TicketService:
         async with ticket_session(interaction.guild_id) as session:
             ticket = await session.get(interaction.channel_id)
             staff = require_access(interaction, ticket)
-            if ticket.status == "closed":
-                content = await session.latest_transcript(ticket)
-                if content is None:
-                    raise TicketError("Aucun transcript sauvegardé n'est disponible pour ce ticket.")
-            else:
-                content = await build_transcript(interaction.channel, ticket, session)
-                await session.save_transcript(ticket, interaction.user.id, content)
+            # Staff can continue writing in a closed ticket: export its current history.
+            content = await build_transcript(interaction.channel, ticket, session)
+            await session.save_transcript(ticket, interaction.user.id, content)
             await session.event(ticket, interaction.user.id, "transcript", staff=staff)
         return ticket, content
+
+    async def deletion_preview(self, interaction):
+        async with ticket_session(interaction.guild_id) as session:
+            ticket = await session.get(interaction.channel_id)
+            require_access(interaction, ticket, staff_only=True)
+            await self.validate_deletion(interaction, ticket, session)
+        return ticket
+
+    @staticmethod
+    async def validate_deletion(interaction, ticket, session):
+        if ticket.status not in {"open", "closed"}:
+            raise TicketError("Ce ticket a déjà été supprimé.")
+        if not interaction.channel.permissions_for(interaction.guild.me).manage_channels:
+            raise TicketError("Le bot doit pouvoir gérer ce salon pour supprimer le ticket.")
+        panels = await session.panels()
+        protected = {panel["channel_id"] for panel in panels}
+        protected.update(panel[key] for panel in panels for key in ("transcript_channel_id", "logs_channel_id")
+                         if panel.get(key))
+        protected.update(value for value in (ticket.transcript_channel_id, ticket.logs_channel_id) if value)
+        if ticket.channel_id in protected:
+            raise TicketError("Ce salon héberge un panneau ou reçoit des transcripts ou des logs. Déplace-les avant de supprimer ce ticket.")
+
+    async def delete(self, interaction, expected_ticket_id):
+        ticket = await self.deletion_preview(interaction)
+        if ticket.id != expected_ticket_id:
+            raise TicketError("Ce ticket ne correspond plus à la confirmation. Relance la suppression.")
+        if ticket.status == "open":
+            ticket, _content = await self.mutate(
+                interaction, "closed", reason="Fermeture avant suppression du ticket par le personnel.",
+                expected_ticket_id=expected_ticket_id,
+            )
+        # Commit an up-to-date archive before the irreversible Discord deletion.
+        async with ticket_session(interaction.guild_id) as session:
+            ticket = await session.get(interaction.channel_id)
+            require_access(interaction, ticket, staff_only=True)
+            await self.validate_deletion(interaction, ticket, session)
+            if ticket.id != expected_ticket_id or ticket.status != "closed":
+                raise TicketError("Le ticket a changé. Relance la suppression.")
+            await session.event(ticket, interaction.user.id, "deletion_requested", staff=True)
+            content = await build_transcript(interaction.channel, ticket, session)
+            await session.save_transcript(ticket, interaction.user.id, content)
+        warning = await self.send_transcript(interaction.guild, ticket, content)
+        if warning:
+            warning = "⚠️ Envoi au salon des transcripts impossible. Le transcript reste conservé dans les archives du ticket."
+        async with ticket_session(interaction.guild_id) as session:
+            ticket = await session.get(interaction.channel_id)
+            require_access(interaction, ticket, staff_only=True)
+            await self.validate_deletion(interaction, ticket, session)
+            if ticket.id != expected_ticket_id or ticket.status != "closed":
+                raise TicketError("Le ticket a été rouvert. Relance la suppression.")
+            await session.delete(ticket)
+            ticket = await session.get(interaction.channel_id)
+            await session.event(ticket, interaction.user.id, "deleted", staff=True)
+            try:
+                await interaction.channel.delete(reason=f"Suppression du ticket confirmée par {interaction.user.id}")
+            except discord.NotFound:
+                pass
+        await self.log_action(interaction.guild, ticket, "deleted", interaction.user.id)
+        return ticket, warning
 
     async def refresh_panel_menus(self, guild, view_factory):
         """Refresh persisted menus while retaining the administrator's panel text."""
@@ -953,10 +1044,7 @@ class TicketService:
 
     async def sync_ticket_name(self, guild, channel, ticket, session, undo):
         base = ticket_base_name(ticket, channel)
-        if ticket.claimed_by is not None:
-            name = claimed_channel_name(base, guild, ticket.claimed_by, emoji=ticket.claim_emoji)
-        else:
-            name = unclaimed_channel_name(base, claimable=ticket.status == "open" and ticket.claim_enabled)
+        name = ticket_channel_name(ticket, guild, base)
         if name != channel.name:
             old = channel.name
             await channel.edit(name=name, reason="Mise à jour de l'état de prise en charge du ticket")

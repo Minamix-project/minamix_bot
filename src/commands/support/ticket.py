@@ -10,7 +10,7 @@ from src.config import GUILD_IDS
 from src.utils.embed import set_bot_footer
 from src.utils.views import ExpiringView
 from src.utils.ticket_errors import send_error
-from src.utils.ticket_controls import TicketCloseView
+from src.utils.ticket_controls import TicketCloseView, show_delete_confirmation
 from src.utils.permissions import is_admin
 from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access, transcript_file
 from src.utils.ticket_setup import SetupContext, SetupHome
@@ -182,7 +182,11 @@ class Tickets(app_commands.Group):
     async def reopen(self, interaction: discord.Interaction):
         await self.change(interaction, "reopened")
 
-    @app_commands.command(name="claim", description="Prendre en charge ce ticket (rôle de support de la catégorie).")
+    @app_commands.command(name="delete", description="Supprimer ce ticket en conservant ses archives (personnel, confirmation).")
+    async def delete(self, interaction: discord.Interaction):
+        await show_delete_confirmation(self.service, interaction)
+
+    @app_commands.command(name="claim", description="Prendre en charge ce ticket (support de la catégorie ou administration).")
     async def claim(self, interaction: discord.Interaction):
         await self.assignment(interaction, release=False)
 
@@ -414,6 +418,18 @@ class TicketActivity(commands.Cog):
             return
         if isinstance(message.author, discord.Member):
             await record_staff_message(message.guild.id, message.channel.id, message.author)
+
+    @commands.Cog.listener()
+    async def on_guild_role_update(self, before, after):
+        if (after.guild.id in GUILD_IDS
+                and (before.permissions.manage_guild != after.permissions.manage_guild
+                     or before.permissions.administrator != after.permissions.administrator)):
+            await self.service.sync_categories(after.guild)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role):
+        if role.guild.id in GUILD_IDS and (role.permissions.manage_guild or role.permissions.administrator):
+            await self.service.sync_categories(role.guild)
 
 
 async def register(bot):

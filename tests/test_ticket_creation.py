@@ -19,7 +19,7 @@ def creation_session(monkeypatch, env, panels=None):
     panels = panels if panels is not None else [panel_record()]
     current = None
 
-    async def create(channel_id, creator_id, category, panel, *, number, staff_role_ids, category_version, channel_base_name):
+    async def create(channel_id, creator_id, category, panel, *, number, staff_role_ids, category_version, channel_base_name, admin_role_ids=()):
         nonlocal current
         current = ticket(
             channel_id=channel_id, creator_id=creator_id, category=category, ticket_number=number,

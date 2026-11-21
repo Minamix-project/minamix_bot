@@ -97,10 +97,10 @@ def test_closed_ticket_sync_keeps_participants_hidden_and_updates_reopening_role
         await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         updated = env.current.overwrites
         assert env.staff_role not in updated
-        assert updated[new_role].view_channel is True and updated[new_role].send_messages is False
-        assert updated[env.creator].view_channel is False
+        assert updated[new_role].view_channel is True and updated[new_role].send_messages is True
+        assert updated[env.creator].view_channel is True
         # This invited member now belongs to the new support team.
-        assert updated[env.outsider].view_channel is True and updated[env.outsider].send_messages is False
+        assert updated[env.outsider].view_channel is True and updated[env.outsider].send_messages is True
         assert updated[env.guild.me].send_messages is True
         snapshot = session.update_category.await_args.args[2]
         entries = json.loads(snapshot)
@@ -182,7 +182,7 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
         async with store.ticket_session(999) as foreign:
             assert await foreign.for_category("report") == []
         assert env.current.overwrites[new_role].send_messages is True
-        assert archived.overwrites[new_role].send_messages is False
+        assert archived.overwrites[new_role].send_messages is True
         assert archived.overwrites[env.creator].view_channel is False
 
     asyncio.run(scenario())
