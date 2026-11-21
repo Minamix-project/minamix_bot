@@ -221,6 +221,7 @@ def test_inaccessible_ticket_does_not_leave_other_tickets_partially_updated(monk
         env, _new_role, current, draft, session, message = synchronization(monkeypatch)
         other = Mock(spec=discord.TextChannel)
         other.id, other.guild = 50, env.guild
+        other.name = "ticket-0050"
         other.overwrites = dict(env.current.overwrites)
         other.history = env.current.history
         other.topic = None

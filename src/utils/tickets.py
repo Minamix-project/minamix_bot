@@ -1,6 +1,7 @@
 """Guild-scoped ticket persistence and serialized, transactional mutations."""
 
 from contextlib import asynccontextmanager
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -9,6 +10,8 @@ import logging
 import aiomysql
 
 from src.utils.db import get_db_connection
+
+TICKET_SESSION_TIMEOUT = 45
 
 
 @dataclass(frozen=True)
@@ -506,23 +509,32 @@ async def ticket_session(guild_id):
     db = await get_db_connection()
     lock_name = f"aurum:tickets:{guild_id}"
     locked = False
+    deadline = asyncio.timeout(TICKET_SESSION_TIMEOUT)
     try:
-        async with db.cursor() as cursor:
-            await cursor.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
-            locked = (await cursor.fetchone())[0] == 1
-        if not locked:
-            raise TicketError("Une opération sur les tickets est en cours. Réessaie dans quelques secondes.")
-        await db.begin()
-        yield TicketSession(db, guild_id)
-        await db.commit()
+        async with deadline:
+            async with db.cursor() as cursor:
+                await cursor.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
+                locked = (await cursor.fetchone())[0] == 1
+            if not locked:
+                raise TicketError("Une opération sur les tickets est en cours. Réessaie dans quelques secondes.")
+            await db.begin()
+            yield TicketSession(db, guild_id)
+            await db.commit()
+    except TimeoutError as exc:
+        await db.rollback()
+        if deadline.expired():
+            logger.warning("Ticket transaction timed out guild=%s", guild_id)
+            raise TicketError("L'opération a pris trop de temps et a été interrompue pour libérer les tickets. Vérifie le ticket avant de réessayer.") from exc
+        raise
     except BaseException:
         await db.rollback()
         raise
     finally:
         try:
             if locked:
-                async with db.cursor() as cursor:
-                    await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                async with asyncio.timeout(5):
+                    async with db.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
         except Exception:
             # Cleanup failure must not undo a Discord action after a successful commit.
             logger.exception("Could not release ticket lock guild=%s", guild_id)

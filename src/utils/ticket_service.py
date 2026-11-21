@@ -1,7 +1,9 @@
 """Discord ticket lifecycle, access controls and plain-text transcript exports."""
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import timezone
+import asyncio
 import io
 import json
 import logging
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 NO_MENTIONS = discord.AllowedMentions.none()
 MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024
 MAX_TRANSCRIPT_MESSAGES = 20000
+_channel_cooldowns = {}
 DEFAULT_PANEL_TITLE = "Besoin d’aide ?"
 DEFAULT_PANEL_TEXT = (
     "Choisis le type de demande ci-dessous.\n"
@@ -46,6 +49,25 @@ EVENT_LABELS = {
 
 def is_staff(member, staff_role_ids):
     return is_admin(member) or bool(set(staff_role_ids).intersection(role.id for role in getattr(member, "roles", ())))
+
+
+async def edit_channel(channel, **kwargs):
+    """Respect channel cooldowns without sleeping while holding a guild lock."""
+    key = channel.guild.id, channel.id
+    now = asyncio.get_running_loop().time()
+    retry_at = _channel_cooldowns.get(key, 0)
+    if retry_at > now:
+        raise discord.RateLimited(retry_at - now)
+    _channel_cooldowns.pop(key, None)
+    try:
+        updated = await channel.edit(**kwargs)
+        if "name" in kwargs and isinstance(updated, discord.TextChannel):
+            # discord.py returns a new channel; avoid renaming the stale object again.
+            channel.name = updated.name
+        return updated
+    except discord.RateLimited as exc:
+        _channel_cooldowns[key] = asyncio.get_running_loop().time() + exc.retry_after
+        raise
 
 
 def admin_roles(guild):
@@ -413,7 +435,10 @@ async def operation(guild_id):
     except BaseException:
         for callback in reversed(undo):
             try:
-                await callback()
+                async with asyncio.timeout(10):
+                    await callback()
+            except (TimeoutError, discord.RateLimited):
+                logger.warning("Discord delayed ticket compensation guild=%s", guild_id)
             except Exception:
                 logger.exception("Could not compensate ticket Discord mutation guild=%s", guild_id)
         raise
@@ -446,13 +471,17 @@ class TicketService:
                 return message
         return None
 
-    async def sync_category_tickets(self, guild, category, session, undo):
+    async def sync_category_tickets(self, guild, category, session, undo, *, channel_id=None):
         staff_roles = [guild.get_role(role_id) for role_id in category["staff_role_ids"]]
         validate_staff_roles(guild, staff_roles)
         administrators = admin_roles(guild)
         management_roles = list({role.id: role for role in [*staff_roles, *administrators]}.values())
         plans = []
-        for ticket in await session.for_category(category["category_key"]):
+        candidates = ([await session.get(channel_id)] if channel_id is not None
+                      else await session.for_category(category["category_key"]))
+        for ticket in candidates:
+            if ticket is None or ticket.category != category["category_key"]:
+                continue
             if ticket.status == "deleted":
                 continue
             if (ticket.category_version == category["version"]
@@ -476,9 +505,20 @@ class TicketService:
                           replace_saved_staff(guild, ticket, management_roles), message))
         for ticket, channel, old, updated, saved, message in plans:
             old_topic = channel.topic
-            await channel.edit(overwrites=updated, topic=f"Aurum | {category['name']} | {ticket.creator_id}",
-                               reason="Mise à jour de la catégorie de support")
-            undo.append(lambda channel=channel, old=old, topic=old_topic: channel.edit(overwrites=old, topic=topic))
+            old_name = channel.name
+            base = ticket_base_name(ticket, channel)
+            name = ticket_channel_name(ticket, guild, base)
+            topic = f"Aurum | {category['name']} | {ticket.creator_id}"
+            changes, previous = {}, {}
+            if serialize_overwrites(old) != serialize_overwrites(updated):
+                changes["overwrites"], previous["overwrites"] = updated, old
+            if topic != old_topic:
+                changes["topic"], previous["topic"] = topic, old_topic
+            if name != old_name:
+                changes["name"], previous["name"] = name, old_name
+            if changes:
+                await edit_channel(channel, **changes, reason="Mise à jour de la catégorie de support")
+                undo.append(lambda channel=channel, previous=previous: edit_channel(channel, **previous))
             if message:
                 old_embeds = list(message.embeds)
                 old_view = previous_ticket_controls(self, message)
@@ -486,7 +526,8 @@ class TicketService:
                                    view=TicketCloseView(self, ticket), allowed_mentions=NO_MENTIONS)
                 undo.append(lambda message=message, embeds=old_embeds, view=old_view:
                             message.edit(embeds=embeds, view=view, allowed_mentions=NO_MENTIONS))
-            await self.sync_ticket_name(guild, channel, ticket, session, undo)
+            if ticket.channel_base_name is None:
+                await session.set_channel_base_name(ticket, base)
             await session.update_category(ticket, category, saved, message.id if message else ticket.welcome_message_id,
                                           admin_role_ids=tuple(role.id for role in administrators))
 
@@ -539,8 +580,8 @@ class TicketService:
             if ticket.channel_base_name is None:
                 await session.set_channel_base_name(ticket, base)
             old_name = channel.name
-            await channel.edit(name=name, reason="Libération du ticket" if release else "Prise en charge du ticket")
-            undo.append(lambda: channel.edit(name=old_name))
+            await edit_channel(channel, name=name, reason="Libération du ticket" if release else "Prise en charge du ticket")
+            undo.append(lambda: edit_channel(channel, name=old_name))
             ticket = await session.get(channel.id)
             action = "released" if release else "claimed"
             if release:
@@ -626,21 +667,17 @@ class TicketService:
 
     async def sync_categories(self, guild):
         async with ticket_session(guild.id) as session:
-            categories = await session.categories()
-            known_keys = {category["category_key"] for category in categories}
-            for ticket in await session.all():
-                if ticket.category not in known_keys:
-                    category = await session.category(ticket.category, include_inactive=True)
-                    if category:
-                        categories.append(category)
-                    known_keys.add(ticket.category)
-        for category in categories:
+            tickets = await session.all()
+        for ticket in tickets:
+            if ticket.status == "deleted":
+                continue
             try:
                 async with operation(guild.id) as (session, undo):
-                    current = await session.category(category["category_key"], include_inactive=True)
-                    await self.sync_category_tickets(guild, current, session, undo)
-            except (TicketError, discord.HTTPException):
-                logger.warning("Could not synchronize ticket category guild=%s category=%s", guild.id, category["category_key"])
+                    current = await session.category(ticket.category, include_inactive=True)
+                    if current:
+                        await self.sync_category_tickets(guild, current, session, undo, channel_id=ticket.channel_id)
+            except (TicketError, discord.HTTPException, discord.RateLimited):
+                logger.warning("Could not synchronize ticket guild=%s channel=%s; will retry", guild.id, ticket.channel_id)
 
     async def panel(self, interaction, draft, view):
         if not is_admin(interaction.user):
@@ -860,6 +897,8 @@ class TicketService:
                 if ticket.id != expected_ticket_id:
                     raise TicketError("Ce ticket ne correspond plus à la confirmation. Relance la fermeture.")
             channel = interaction.channel
+            old_name = channel.name
+            base = ticket_base_name(ticket, channel)
             if action == "reopened":
                 if ticket.status != "closed":
                     raise TicketError("Ce ticket est déjà ouvert.")
@@ -871,8 +910,9 @@ class TicketService:
                 # Always keep the channel private, even if its category has changed.
                 overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(view_channel=False)
                 old = channel.overwrites
-                await channel.edit(overwrites=overwrites, reason="Réouverture du ticket")
-                undo.append(lambda: channel.edit(overwrites=old))
+                name = ticket_channel_name(replace(ticket, status="open"), interaction.guild, base)
+                await edit_channel(channel, overwrites=overwrites, name=name, reason="Réouverture du ticket")
+                undo.append(lambda: edit_channel(channel, overwrites=old, name=old_name))
                 await session.reopen(ticket)
                 detail = None
                 content = None
@@ -885,13 +925,14 @@ class TicketService:
                     if not 1 <= len(reason) <= 1000:
                         raise TicketError("Indique une raison de fermeture de 1 à 1 000 caractères.")
                     old = channel.overwrites
-                    await channel.edit(
+                    await edit_channel(channel,
                         overwrites=archive_overwrites(
                             interaction.guild, old, ticket.staff_role_ids, creator_id=ticket.creator_id
                         ),
+                        name=ticket_channel_name(replace(ticket, status="closed"), interaction.guild, base),
                         reason="Fermeture du ticket",
                     )
-                    undo.append(lambda: channel.edit(overwrites=old))
+                    undo.append(lambda: edit_channel(channel, overwrites=old, name=old_name))
                     await session.close(ticket, interaction.user.id, reason, serialize_overwrites(old))
                     detail = reason
                 elif action in {"added", "removed"}:
@@ -916,8 +957,8 @@ class TicketService:
                     updated[user] = (
                         member_overwrite() if action == "added" else discord.PermissionOverwrite(view_channel=False)
                     )
-                    await channel.edit(overwrites=updated, reason="Modification des membres du ticket")
-                    undo.append(lambda: channel.edit(overwrites=old))
+                    await edit_channel(channel, overwrites=updated, reason="Modification des membres du ticket")
+                    undo.append(lambda: edit_channel(channel, overwrites=old))
                     detail = str(user.id)
                 elif action == "renamed":
                     name = re.sub(r"[^\w-]+", "-", (name or "").strip().lower()).strip("-_")
@@ -932,8 +973,8 @@ class TicketService:
                         name = claimed_channel_name(name, interaction.guild, ticket.claimed_by, emoji=ticket.claim_emoji)
                     else:
                         name = unclaimed_channel_name(name, claimable=ticket.claim_enabled)
-                    await channel.edit(name=name, reason="Renommage du ticket")
-                    undo.append(lambda: channel.edit(name=old_name))
+                    await edit_channel(channel, name=name, reason="Renommage du ticket")
+                    undo.append(lambda: edit_channel(channel, name=old_name))
                     detail = name
                 elif action == "linked":
                     if user.guild.id != interaction.guild_id:
@@ -945,7 +986,8 @@ class TicketService:
             ticket = await session.get(channel.id)
             await session.event(ticket, interaction.user.id, action, detail, staff=staff)
             if action in {"closed", "reopened"}:
-                await self.sync_ticket_name(interaction.guild, channel, ticket, session, undo)
+                if ticket.channel_base_name is None:
+                    await session.set_channel_base_name(ticket, base)
                 await self.refresh_opening(interaction.guild, channel, ticket, session, undo)
             if action == "closed":
                 content = await build_transcript(channel, ticket, session)
@@ -1039,7 +1081,7 @@ class TicketService:
                     await message.edit(view=view)
             except discord.NotFound:
                 continue
-            except discord.HTTPException:
+            except (discord.HTTPException, discord.RateLimited):
                 logger.warning("Could not refresh ticket panel guild=%s panel=%s", guild.id, panel["id"])
 
     async def sync_ticket_name(self, guild, channel, ticket, session, undo):
@@ -1047,8 +1089,8 @@ class TicketService:
         name = ticket_channel_name(ticket, guild, base)
         if name != channel.name:
             old = channel.name
-            await channel.edit(name=name, reason="Mise à jour de l'état de prise en charge du ticket")
-            undo.append(lambda: channel.edit(name=old))
+            await edit_channel(channel, name=name, reason="Mise à jour de l'état de prise en charge du ticket")
+            undo.append(lambda: edit_channel(channel, name=old))
         if ticket.channel_base_name is None:
             await session.set_channel_base_name(ticket, base)
 
@@ -1084,7 +1126,7 @@ class TicketService:
                     current = await session.get(ticket.channel_id)
                     if current:
                         await self.sync_ticket_name(guild, channel, current, session, undo)
-            except (TicketError, discord.HTTPException):
+            except (TicketError, discord.HTTPException, discord.RateLimited):
                 logger.warning("Could not normalize ticket channel guild=%s channel=%s", guild.id, ticket.channel_id)
 
     async def purge_preview(self, interaction):
@@ -1147,7 +1189,7 @@ class TicketService:
                 reason = reason[:940] + "\n… Raison complète dans le transcript joint."
             embed.add_field(name="Raison", value=reason, inline=False)
             await channel.send(embed=embed, file=transcript_file(ticket, content), allowed_mentions=NO_MENTIONS)
-        except (TicketError, discord.HTTPException):
+        except (TicketError, discord.HTTPException, discord.RateLimited):
             return "⚠️ Envoi au salon des transcripts impossible. Le transcript reste sauvegardé ; utilise `/ticket transcript`."
         return None
 

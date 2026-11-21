@@ -1,10 +1,12 @@
 """English ticket commands and a persistent French support panel."""
 
 from datetime import timezone
+import asyncio
+import logging
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from src.config import GUILD_IDS
 from src.utils.embed import set_bot_footer
@@ -16,6 +18,8 @@ from src.utils.ticket_service import NO_MENTIONS, TicketService, require_access,
 from src.utils.ticket_setup import SetupContext, SetupHome
 from src.utils.tickets import CATEGORY_OPTIONS, TicketError, record_staff_message, ticket_session
 from src.utils.ticket_categories import CategoryEditor
+
+logger = logging.getLogger(__name__)
 
 
 class TicketPanel(discord.ui.View):
@@ -398,19 +402,53 @@ class TicketActivity(commands.Cog):
     def __init__(self, bot, service):
         self.bot = bot
         self.service = service
-        self.normalized = False
+        self._synchronizing = False
+        self._panels_refreshed = set()
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if self.normalized:
+        if not self.retry_sync.is_running():
+            self.retry_sync.start()
+
+    @tasks.loop(minutes=1)
+    async def retry_sync(self):
+        await self.bot.wait_until_ready()
+        try:
+            await self.synchronize()
+        except Exception:
+            logger.exception("Ticket synchronization failed; will retry")
+
+    @retry_sync.before_loop
+    async def wait_for_ready(self):
+        await self.bot.wait_until_ready()
+
+    async def synchronize(self):
+        if self._synchronizing:
             return
-        for guild_id in GUILD_IDS:
-            guild = self.bot.get_guild(guild_id)
-            if guild:
-                await self.service.sync_categories(guild)
-                await self.service.normalize_channel_names(guild)
-                await self.service.refresh_panel_menus(guild, lambda: TicketPanel(self.service))
-        self.normalized = True
+        self._synchronizing = True
+        try:
+            for guild_id in GUILD_IDS:
+                guild = self.bot.get_guild(guild_id)
+                if guild:
+                    try:
+                        await self.service.sync_categories(guild)
+                        await self.service.normalize_channel_names(guild)
+                        if guild_id not in self._panels_refreshed:
+                            await self.service.refresh_panel_menus(guild, lambda: TicketPanel(self.service))
+                            self._panels_refreshed.add(guild_id)
+                    except (TicketError, discord.HTTPException, discord.RateLimited):
+                        logger.warning("Ticket synchronization deferred guild=%s", guild_id)
+        finally:
+            self._synchronizing = False
+
+    async def cog_unload(self):
+        task = self.retry_sync.get_task()
+        self.retry_sync.cancel()
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -424,12 +462,12 @@ class TicketActivity(commands.Cog):
         if (after.guild.id in GUILD_IDS
                 and (before.permissions.manage_guild != after.permissions.manage_guild
                      or before.permissions.administrator != after.permissions.administrator)):
-            await self.service.sync_categories(after.guild)
+            await self.synchronize()
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role):
         if role.guild.id in GUILD_IDS and (role.permissions.manage_guild or role.permissions.administrator):
-            await self.service.sync_categories(role.guild)
+            await self.synchronize()
 
 
 async def register(bot):

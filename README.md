@@ -762,6 +762,20 @@ MySQL cannot commit atomically: a process termination between their operations
 can require manual reconciliation. A deleted channel can be reconciled without
 inventing a transcript; previously stored exports remain in the database.
 
+Discord requests reject rate-limit waits longer than 30 seconds. Ticket channel
+edits remember Discord's retry deadline and refuse repeated requests locally
+until that deadline expires. The response gives the affected member the retry
+delay, without creating a technical error alert. Ticket transactions have a
+45-second deadline and release their guild lock on timeout or cancellation.
+Compensating Discord calls are also bounded so recovery cannot wait indefinitely.
+
+Background synchronization processes and commits one ticket at a time, skips
+rate-limited channels, and retries unfinished work every minute while the bot is
+ready. Reconnects share one worker, which is cancelled when the cog is unloaded.
+Names, permissions and topics are combined into one channel edit when needed;
+unchanged fields and already applied names are not sent again. This prevents a
+long channel cooldown from blocking synchronization of the other tickets.
+
 Transcripts include available messages in chronological order, author/message
 IDs, timestamps, replies, embed text, attachment links, ticket metadata and action
 history. They do not include deleted messages, past edits, thread histories or

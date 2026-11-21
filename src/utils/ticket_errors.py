@@ -15,6 +15,8 @@ async def send_error(interaction, error):
         error = error.original
     if isinstance(error, TicketError):
         message = f"❌ {error}"
+    elif isinstance(error, discord.RateLimited):
+        message = f"❌ Discord limite temporairement les modifications de ce salon. Réessaie dans {max(1, int(error.retry_after) + 1)} secondes. Les autres tickets restent disponibles."
     elif isinstance(error, app_commands.CheckFailure):
         message = "❌ Cette action est réservée à l'administration du serveur."
     elif isinstance(error, discord.Forbidden):

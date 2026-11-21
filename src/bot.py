@@ -46,7 +46,7 @@ async def _main():
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents, max_ratelimit_timeout=30.0)
 
     async def guild_only(interaction: discord.Interaction) -> bool:
         if interaction.guild_id not in GUILD_IDS:
