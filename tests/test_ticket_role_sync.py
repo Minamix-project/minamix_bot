@@ -143,6 +143,7 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
             db.close()
         archived = Mock(spec=discord.TextChannel)
         archived.id, archived.guild = 50, env.guild
+        archived.name = "archive-personnalisee"
         archived.topic = None
         archived.history = env.current.history
         original = dict(env.current.overwrites)
@@ -150,7 +151,9 @@ def test_mysql_panel_role_sync_updates_only_attached_tickets_and_persists_archiv
         archived.permissions_for.return_value = discord.Permissions(manage_channels=True, manage_roles=True)
 
         async def edit(**kwargs):
-            archived.overwrites = kwargs["overwrites"]
+            for key in ("name", "topic", "overwrites"):
+                if key in kwargs:
+                    setattr(archived, key, kwargs[key])
 
         archived.edit = AsyncMock(side_effect=edit)
         env.channels[50] = archived
@@ -206,7 +209,7 @@ def test_failed_category_commit_restores_existing_ticket_permissions(monkeypatch
         with pytest.raises(RuntimeError, match="Commit failed"):
             await service.TicketService().save_category(env.interaction, draft, lambda: TicketPanel(None))
         assert service.serialize_overwrites(env.current.overwrites) == original
-        assert env.current.edit.await_count == 2
+        assert sum("overwrites" in call.kwargs for call in env.current.edit.await_args_list) == 2
         assert message.edit.await_count == 2
         session.update_category.assert_awaited_once()
     asyncio.run(scenario())
@@ -239,7 +242,7 @@ def test_inaccessible_ticket_does_not_leave_other_tickets_partially_updated(monk
             assert message.edit.await_count == 2
             assert session.update_category.await_args.args[0] == current
             assert session.update_category.await_args.args[1]["staff_role_ids"] == (6,)
-            assert env.current.edit.await_count == 2
+            assert sum("overwrites" in call.kwargs for call in env.current.edit.await_args_list) == 2
     asyncio.run(scenario())
 
 

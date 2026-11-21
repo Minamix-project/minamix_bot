@@ -131,6 +131,8 @@ class Ticket:
     claimed_by: int | None = None
     claimed_at: datetime | None = None
     claim_base_name: str | None = None
+    channel_base_name: str | None = None
+    claim_emoji: str = "🟢"
 
     @classmethod
     def from_row(cls, row):
@@ -222,11 +224,31 @@ class TicketSession:
 
     async def ticket_rows(self, condition, args):
         rows = await self.rows(
-            "SELECT t.*, c.name AS category_name, COALESCE(c.claim_enabled, 1) AS claim_enabled "
+            "SELECT t.*, c.name AS category_name, COALESCE(c.claim_enabled, 1) AS claim_enabled, "
+            "COALESCE(p.emoji, '🟢') AS claim_emoji "
             "FROM tickets t LEFT JOIN ticket_categories c "
-            "ON c.guild_id = t.guild_id AND c.category_key = t.category WHERE " + condition, args,
+            "ON c.guild_id = t.guild_id AND c.category_key = t.category "
+            "LEFT JOIN ticket_staff_preferences p ON p.guild_id = t.guild_id AND p.user_id = t.claimed_by "
+            "WHERE " + condition, args,
         )
         return [Ticket.from_row(row) for row in rows]
+
+    async def for_claimant(self, user_id):
+        return await self.ticket_rows("t.guild_id = %s AND t.claimed_by = %s ORDER BY t.id", (self.guild_id, user_id))
+
+    async def set_staff_emoji(self, user_id, emoji):
+        if emoji is None:
+            await self.execute("DELETE FROM ticket_staff_preferences WHERE guild_id = %s AND user_id = %s",
+                               (self.guild_id, user_id))
+        else:
+            await self.execute(
+                "INSERT INTO ticket_staff_preferences (guild_id, user_id, emoji) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE emoji = %s", (self.guild_id, user_id, emoji, emoji),
+            )
+
+    async def set_channel_base_name(self, ticket, name):
+        await self.execute("UPDATE tickets SET channel_base_name = %s WHERE guild_id = %s AND id = %s",
+                           (name, self.guild_id, ticket.id))
 
     async def panels(self):
         rows = await self.rows("SELECT * FROM ticket_panels WHERE guild_id = %s ORDER BY id", (self.guild_id,))
@@ -355,13 +377,14 @@ class TicketSession:
             "DELETE FROM admin_audit WHERE guild_id = %s AND action LIKE %s", (self.guild_id, "ticket.%")
         )
 
-    async def create(self, channel_id, creator_id, category, panel, *, number=None, staff_role_ids=(), category_version=0):
+    async def create(self, channel_id, creator_id, category, panel, *, number=None, staff_role_ids=(), category_version=0,
+                     channel_base_name=None):
         if number is None:
             number = await self.next_number()
         return await self.execute(
             "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, "
-            "logs_channel_id, ticket_number, panel_id, category_version, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            "logs_channel_id, ticket_number, panel_id, category_version, channel_base_name, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
             (
                 self.guild_id,
                 channel_id,
@@ -373,6 +396,7 @@ class TicketSession:
                 number,
                 panel.get("id"),
                 category_version,
+                channel_base_name,
             ),
         )
 
@@ -403,15 +427,15 @@ class TicketSession:
             if cursor.rowcount != 1:
                 raise TicketError("Ce ticket est déjà pris en charge ou a été fermé. Actualise le ticket.")
 
-    async def release(self, ticket, actor_id):
+    async def release(self, ticket):
         async with self.db.cursor() as cursor:
             await cursor.execute(
                 "UPDATE tickets SET claimed_by = NULL, claimed_at = NULL, claim_base_name = NULL "
                 "WHERE guild_id = %s AND id = %s AND claimed_by = %s",
-                (self.guild_id, ticket.id, actor_id),
+                (self.guild_id, ticket.id, ticket.claimed_by),
             )
             if cursor.rowcount != 1:
-                raise TicketError("Seul le responsable actuel peut libérer ce ticket.")
+                raise TicketError("Le responsable de ce ticket a changé. Actualise le ticket avant de le libérer.")
 
     async def set_claim_base_name(self, ticket, name):
         await self.execute(

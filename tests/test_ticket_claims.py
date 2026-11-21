@@ -1,4 +1,4 @@
-"""Exclusive ticket assignment without permission changes or administrator overrides."""
+"""Exclusive ticket assignment and authorized release without access changes."""
 
 import asyncio
 from dataclasses import replace
@@ -46,15 +46,18 @@ def assignment(monkeypatch, *, fail_commit=False, **changes):
     async def claim(current, actor_id, base_name):
         state["ticket"] = replace(current, claimed_by=actor_id, claimed_at=datetime(2026, 11, 19), claim_base_name=base_name)
 
-    async def release(current, actor_id):
+    async def release(current):
         state["ticket"] = replace(current, claimed_by=None, claimed_at=None, claim_base_name=None)
 
     async def set_base(current, name):
-        state["ticket"] = replace(current, claim_base_name=name)
+        state["ticket"] = replace(state["ticket"], claim_base_name=name)
+
+    async def set_channel_base(current, name):
+        state["ticket"] = replace(state["ticket"], channel_base_name=name)
 
     session = SimpleNamespace(get=AsyncMock(side_effect=lambda channel_id: state["ticket"]),
         category=AsyncMock(return_value=category_record(staff_role_ids=(5,))), claim=AsyncMock(side_effect=claim),
-        release=AsyncMock(side_effect=release), set_claim_base_name=AsyncMock(side_effect=set_base), event=AsyncMock())
+        release=AsyncMock(side_effect=release), set_channel_base_name=AsyncMock(side_effect=set_channel_base), set_claim_base_name=AsyncMock(side_effect=set_base), event=AsyncMock())
     install_session(monkeypatch, session, fail_commit=fail_commit)
     return env, state, session, message
 
@@ -79,6 +82,7 @@ def test_claim_is_exclusive_and_owner_release_restores_the_original_name_without
         env.interaction.user = env.admin
         with pytest.raises(store.TicketError, match="déjà pris en charge"):
             await manager.assign(env.interaction)
+        env.interaction.user = env.creator
         with pytest.raises(store.TicketError, match="Seul le responsable"):
             await manager.assign(env.interaction, release=True)
         assert state["ticket"].claimed_by == 3
@@ -86,7 +90,7 @@ def test_claim_is_exclusive_and_owner_release_restores_the_original_name_without
         env.staff.roles = [env.guild.default_role]
         released = await manager.assign(env.interaction, release=True)
         assert released.claimed_by is None and released.claimed_at is None
-        assert env.current.name == "ticket-0001"
+        assert env.current.name == "ticket-0001-🔴"
         assert service.serialize_overwrites(env.current.overwrites) == permissions
         assert all(set(call.kwargs) <= {"name", "reason"} for call in env.current.edit.await_args_list)
         assert not any(field.name == "Responsable" for field in message.embeds[0].fields)
@@ -139,6 +143,25 @@ def test_owner_can_release_after_claiming_is_disabled_and_others_cannot(monkeypa
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("permission", ["manage_guild", "administrator", "manage_messages"])
+def test_admins_can_release_another_members_ticket_but_moderation_permissions_do_not_suffice(monkeypatch, permission):
+    async def scenario():
+        env, state, session, _message = assignment(monkeypatch, claimed_by=3, claim_base_name="ticket-0001")
+        env.interaction.user = env.admin
+        env.admin.guild_permissions = discord.Permissions(**{permission: True})
+        if permission == "manage_messages":
+            with pytest.raises(store.TicketError, match="responsable actuel ou un administrateur"):
+                await service.TicketService().assign(env.interaction, release=True)
+            session.release.assert_not_awaited()
+        else:
+            released = await service.TicketService().assign(env.interaction, release=True)
+            assert released.claimed_by is None
+            assert env.current.name == "ticket-0001-🔴"
+            assert state["ticket"].claimed_by is None
+            session.event.assert_awaited_once_with(released, env.admin.id, "released", "3", staff=True)
+    asyncio.run(scenario())
+
+
 def test_renaming_a_claimed_ticket_keeps_the_marker_and_release_uses_the_new_base_name(monkeypatch):
     async def scenario():
         env, _state, _session, _message = assignment(monkeypatch)
@@ -147,7 +170,7 @@ def test_renaming_a_claimed_ticket_keeps_the_marker_and_release_uses_the_new_bas
         await manager.mutate(env.interaction, "renamed", name="Support RP")
         assert env.current.name == "support-rp-🟢-member-3"
         await manager.assign(env.interaction, release=True)
-        assert env.current.name == "support-rp"
+        assert env.current.name == "support-rp-🔴"
     asyncio.run(scenario())
 
 
@@ -262,12 +285,12 @@ def test_mysql_claims_are_exclusive_persistent_and_follow_the_category_toggle(mo
             persisted = await session.get(40)
             assert persisted.claimed_by == claimed.claimed_by and persisted.claimed_at
             assert persisted.claim_base_name == "ticket-0001"
-        env.interaction.user = env.admin
+        env.interaction.user = env.creator if claimed.claimed_by == env.staff.id else env.staff
         with pytest.raises(store.TicketError, match="Seul le responsable"):
             await manager.assign(env.interaction, release=True)
         env.interaction.user = env.guild.get_member(claimed.claimed_by)
         released = await manager.assign(env.interaction, release=True)
-        assert released.claimed_by is None and env.channels[40].name == "ticket-0001"
+        assert released.claimed_by is None and env.channels[40].name == "ticket-0001-🔴"
         assert service.serialize_overwrites(env.channels[40].overwrites) == permissions
         async with store.ticket_session(1) as session:
             _staff, events = await session.history(released)
@@ -288,7 +311,8 @@ def test_mysql_claims_are_exclusive_persistent_and_follow_the_category_toggle(mo
     asyncio.run(scenario())
 
 
-def test_mysql_claim_migration_enables_existing_categories_and_preserves_existing_tickets(monkeypatch, tmp_path):
+@pytest.mark.parametrize("migration_cutoff", ["0019", "0020"])
+def test_mysql_claim_migration_enables_existing_categories_and_preserves_existing_tickets(monkeypatch, tmp_path, migration_cutoff):
     import aiomysql
     from pathlib import Path
     from src.core import schema_migrations
@@ -301,7 +325,7 @@ def test_mysql_claim_migration_enables_existing_categories_and_preserves_existin
     legacy_migrations = tmp_path / "legacy_migrations"
     legacy_migrations.mkdir()
     for path in current_migrations.glob("*.sql"):
-        if path.name < "0019":
+        if path.name < migration_cutoff:
             (legacy_migrations / path.name).write_text(path.read_text())
     monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", legacy_migrations)
 
@@ -325,14 +349,26 @@ def test_mysql_claim_migration_enables_existing_categories_and_preserves_existin
                         "(guild_id, channel_id, creator_id, category, staff_role_ids, ticket_number, category_version) "
                         "VALUES (1, 10, 2, 'report', JSON_ARRAY(5), 1, 7)"
                     )
+                    if migration_cutoff == "0020":
+                        await cursor.execute(
+                            "UPDATE tickets SET claimed_by = 3, claimed_at = UTC_TIMESTAMP(), "
+                            "claim_base_name = 'rapport-personnalisé' WHERE guild_id = 1"
+                        )
                 monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", current_migrations)
                 await init_db(db)
                 await init_db(db)
                 async with db.cursor() as cursor:
                     await cursor.execute("SELECT claim_enabled, version, name FROM ticket_categories WHERE guild_id = 1")
-                    assert await cursor.fetchone() == (1, 8, "Médiation")
-                    await cursor.execute("SELECT claimed_by, claimed_at, claim_base_name, category_version, ticket_number FROM tickets")
-                    assert await cursor.fetchone() == (None, None, None, 7, 1)
+                    assert await cursor.fetchone() == (1, 8 if migration_cutoff == "0019" else 7, "Médiation")
+                    await cursor.execute(
+                        "SELECT claimed_by, claimed_at, claim_base_name, category_version, ticket_number, channel_base_name FROM tickets"
+                    )
+                    row = await cursor.fetchone()
+                    if migration_cutoff == "0020":
+                        assert row[0] == 3 and row[1] is not None
+                        assert row[2:] == ("rapport-personnalisé", 7, 1, "rapport-personnalisé")
+                    else:
+                        assert row == (None, None, None, 7, 1, None)
             finally:
                 db.close()
         finally:

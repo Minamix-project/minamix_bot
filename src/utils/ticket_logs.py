@@ -33,6 +33,8 @@ def build_ticket_log(guild, ticket, action, actor_id, *, detail=None):
     embed.add_field(name="Par", value=user_text(guild, actor_id), inline=False)
     if ticket.claimed_by is not None:
         embed.add_field(name="Responsable", value=user_text(guild, ticket.claimed_by), inline=False)
+    if action == "released" and detail:
+        embed.add_field(name="Ancien responsable", value=user_text(guild, int(detail)), inline=False)
     if detail and action in {"added", "removed", "linked"}:
         label = "Utilisateur concerné" if action == "linked" else "Membre concerné"
         embed.add_field(name=label, value=user_text(guild, int(detail)), inline=False)

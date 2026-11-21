@@ -186,9 +186,17 @@ class Tickets(app_commands.Group):
     async def claim(self, interaction: discord.Interaction):
         await self.assignment(interaction, release=False)
 
-    @app_commands.command(name="release", description="Libérer ce ticket (responsable actuel uniquement).")
+    @app_commands.command(name="release", description="Libérer ce ticket (responsable actuel ou administration).")
     async def release(self, interaction: discord.Interaction):
         await self.assignment(interaction, release=True)
+
+    @app_commands.command(name="emoji", description="Définir ton emoji personnel pour les tickets pris en charge.")
+    @app_commands.describe(emoji="Ton emoji Unicode ; laisse vide pour revenir à la pastille verte")
+    async def emoji(self, interaction: discord.Interaction, emoji: app_commands.Range[str, 1, 32] | None = None):
+        await interaction.response.defer(ephemeral=True)
+        selected = await self.service.set_staff_emoji(interaction, emoji)
+        text = f"Ton emoji de prise en charge est maintenant {selected}." if emoji is not None else "Ton emoji a été réinitialisé à 🟢."
+        await interaction.followup.send(f"✅ {text}", ephemeral=True, allowed_mentions=NO_MENTIONS)
 
     async def assignment(self, interaction, *, release):
         await interaction.response.defer(ephemeral=True)

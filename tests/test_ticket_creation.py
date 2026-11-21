@@ -19,12 +19,12 @@ def creation_session(monkeypatch, env, panels=None):
     panels = panels if panels is not None else [panel_record()]
     current = None
 
-    async def create(channel_id, creator_id, category, panel, *, number, staff_role_ids, category_version):
+    async def create(channel_id, creator_id, category, panel, *, number, staff_role_ids, category_version, channel_base_name):
         nonlocal current
         current = ticket(
             channel_id=channel_id, creator_id=creator_id, category=category, ticket_number=number,
             panel_id=panel["id"], logs_channel_id=panel["logs_channel_id"],
-            staff_role_ids=staff_role_ids, category_version=category_version,
+            staff_role_ids=staff_role_ids, category_version=category_version, channel_base_name=channel_base_name,
         )
 
     session = SimpleNamespace(
@@ -49,7 +49,7 @@ def test_creation_paths_share_numbering_welcome_ownership_and_audit(monkeypatch,
             env.interaction, "bot", direct=direct, user=env.creator if on_behalf else None,
         )
         assert created.creator_id == env.creator.id and created.category == "bot"
-        assert env.channels[40].name == "ticket-0012"
+        assert env.channels[40].name == "ticket-0012-🔴"
         session.active.assert_awaited_once_with(env.creator.id, "bot")
         session.event.assert_awaited_once_with(
             created, env.interaction.user.id, "created", CATEGORIES["bot"], staff=on_behalf,
