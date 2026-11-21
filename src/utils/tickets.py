@@ -1,6 +1,7 @@
 """Guild-scoped ticket persistence and serialized, transactional mutations."""
 
 from contextlib import asynccontextmanager
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -9,6 +10,8 @@ import logging
 import aiomysql
 
 from src.utils.db import get_db_connection
+
+TICKET_SESSION_TIMEOUT = 45
 
 
 @dataclass(frozen=True)
@@ -133,10 +136,12 @@ class Ticket:
     claim_base_name: str | None = None
     channel_base_name: str | None = None
     claim_emoji: str = "🟢"
+    admin_role_ids: tuple[int, ...] = ()
 
     @classmethod
     def from_row(cls, row):
-        return cls(**{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"]))})
+        return cls(**{**row, "staff_role_ids": tuple(json.loads(row["staff_role_ids"])),
+                      "admin_role_ids": tuple(json.loads(row.get("admin_role_ids") or "[]"))})
 
     @property
     def reference(self):
@@ -341,12 +346,12 @@ class TicketSession:
             "t.guild_id = %s AND t.category = %s ORDER BY t.id", (self.guild_id, key),
         )
 
-    async def update_category(self, ticket, category, saved_overwrites, welcome_message_id):
+    async def update_category(self, ticket, category, saved_overwrites, welcome_message_id, *, admin_role_ids=()):
         await self.execute(
             "UPDATE tickets SET staff_role_ids = %s, saved_overwrites = %s, category_version = %s, "
-            "welcome_message_id = %s WHERE guild_id = %s AND id = %s",
+            "welcome_message_id = %s, admin_role_ids = %s WHERE guild_id = %s AND id = %s",
             (json.dumps(list(category["staff_role_ids"])), saved_overwrites, category["version"],
-             welcome_message_id, self.guild_id, ticket.id),
+             welcome_message_id, json.dumps(list(admin_role_ids)), self.guild_id, ticket.id),
         )
 
     async def set_welcome_message(self, ticket, message_id):
@@ -378,13 +383,13 @@ class TicketSession:
         )
 
     async def create(self, channel_id, creator_id, category, panel, *, number=None, staff_role_ids=(), category_version=0,
-                     channel_base_name=None):
+                     channel_base_name=None, admin_role_ids=()):
         if number is None:
             number = await self.next_number()
         return await self.execute(
             "INSERT INTO tickets (guild_id, channel_id, creator_id, category, staff_role_ids, transcript_channel_id, "
-            "logs_channel_id, ticket_number, panel_id, category_version, channel_base_name, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
+            "logs_channel_id, ticket_number, panel_id, category_version, channel_base_name, admin_role_ids, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())",
             (
                 self.guild_id,
                 channel_id,
@@ -397,6 +402,7 @@ class TicketSession:
                 panel.get("id"),
                 category_version,
                 channel_base_name,
+                json.dumps(list(admin_role_ids)),
             ),
         )
 
@@ -457,6 +463,11 @@ class TicketSession:
             (ticket.id, self.guild_id),
         )
 
+    async def delete(self, ticket):
+        # Retain events and transcripts; only a full purge removes archives.
+        await self.execute("UPDATE tickets SET status = 'deleted' WHERE id = %s AND guild_id = %s",
+                           (ticket.id, self.guild_id))
+
     async def link(self, ticket, subject_id):
         await self.execute(
             "UPDATE tickets SET subject_id = %s WHERE id = %s AND guild_id = %s", (subject_id, ticket.id, self.guild_id)
@@ -498,23 +509,32 @@ async def ticket_session(guild_id):
     db = await get_db_connection()
     lock_name = f"aurum:tickets:{guild_id}"
     locked = False
+    deadline = asyncio.timeout(TICKET_SESSION_TIMEOUT)
     try:
-        async with db.cursor() as cursor:
-            await cursor.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
-            locked = (await cursor.fetchone())[0] == 1
-        if not locked:
-            raise TicketError("Une opération sur les tickets est en cours. Réessaie dans quelques secondes.")
-        await db.begin()
-        yield TicketSession(db, guild_id)
-        await db.commit()
+        async with deadline:
+            async with db.cursor() as cursor:
+                await cursor.execute("SELECT GET_LOCK(%s, 0)", (lock_name,))
+                locked = (await cursor.fetchone())[0] == 1
+            if not locked:
+                raise TicketError("Une opération sur les tickets est en cours. Réessaie dans quelques secondes.")
+            await db.begin()
+            yield TicketSession(db, guild_id)
+            await db.commit()
+    except TimeoutError as exc:
+        await db.rollback()
+        if deadline.expired():
+            logger.warning("Ticket transaction timed out guild=%s", guild_id)
+            raise TicketError("L'opération a pris trop de temps et a été interrompue pour libérer les tickets. Vérifie le ticket avant de réessayer.") from exc
+        raise
     except BaseException:
         await db.rollback()
         raise
     finally:
         try:
             if locked:
-                async with db.cursor() as cursor:
-                    await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                async with asyncio.timeout(5):
+                    async with db.cursor() as cursor:
+                        await cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
         except Exception:
             # Cleanup failure must not undo a Discord action after a successful commit.
             logger.exception("Could not release ticket lock guild=%s", guild_id)
@@ -535,7 +555,7 @@ async def record_staff_message(guild_id, channel_id, member):
     try:
         async with db.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, staff_role_ids FROM tickets WHERE guild_id = %s AND channel_id = %s AND status = 'open'",
+                "SELECT id, staff_role_ids FROM tickets WHERE guild_id = %s AND channel_id = %s AND status IN ('open', 'closed')",
                 (guild_id, channel_id),
             )
             row = await cursor.fetchone()

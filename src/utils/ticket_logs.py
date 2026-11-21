@@ -15,6 +15,7 @@ ACTION_STYLES = {
     "linked": ("🔗 Utilisateur lié au ticket", discord.Color.blurple()),
     "claimed": ("🟢 Ticket pris en charge", discord.Color.green()),
     "released": ("↩️ Ticket libéré", discord.Color.orange()),
+    "deleted": ("🗑️ Ticket supprimé", discord.Color.red()),
 }
 
 

@@ -15,7 +15,7 @@ from src.utils.tickets import TicketError
 from test_tickets import destination, install_session, ticket
 
 
-@pytest.mark.parametrize("kind", ["expected", "forbidden", "unexpected"])
+@pytest.mark.parametrize("kind", ["expected", "forbidden", "rate_limited", "unexpected"])
 def test_group_and_global_error_handlers_send_one_reply_and_report_only_unexpected_errors(monkeypatch, kind):
     async def scenario():
         env = destination()
@@ -24,6 +24,7 @@ def test_group_and_global_error_handlers_send_one_reply_and_report_only_unexpect
             "expected": TicketError("Ce membre est le créateur du ticket ; il n'a pas besoin d'être ajouté."),
             "forbidden": discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Missing Permissions"),
             "unexpected": RuntimeError("Unexpected storage failure"),
+            "rate_limited": discord.RateLimited(580.5),
         }[kind]
         local_report = AsyncMock(return_value="local-ref")
         global_report = AsyncMock(return_value="global-ref")
@@ -57,7 +58,10 @@ def test_group_and_global_error_handlers_send_one_reply_and_report_only_unexpect
             else:
                 local_report.assert_not_awaited()
                 assert "Référence" not in message
-                assert "créateur" in message if kind == "expected" else "permissions" in message
+                if kind == "rate_limited":
+                    assert "581 secondes" in message and "autres tickets" in message
+                else:
+                    assert "créateur" in message if kind == "expected" else "permissions" in message
 
     asyncio.run(scenario())
 

@@ -1,6 +1,6 @@
 """Global application-command errors coordinated with local error handlers."""
 
-from discord import app_commands
+from discord import RateLimited, app_commands
 
 from src.utils.error_reporting import report_error
 
@@ -16,7 +16,10 @@ async def handle_app_command_error(bot, interaction, error):
     # discord.py invokes the tree handler even after a command/group error handler.
     if interaction.extras.get(ERROR_HANDLED_KEY):
         return
-    if isinstance(error, app_commands.CommandOnCooldown):
+    original = error.original if isinstance(error, app_commands.CommandInvokeError) else error
+    if isinstance(original, RateLimited):
+        message = f"❌ Discord limite temporairement cette action. Réessaie dans {max(1, int(original.retry_after) + 1)} secondes."
+    elif isinstance(error, app_commands.CommandOnCooldown):
         message = f"Patiente encore {max(1, int(error.retry_after) + 1)} secondes avant de réutiliser cette commande."
     elif isinstance(error, app_commands.CheckFailure):
         message = "❌ Vous n'avez pas la permission d'utiliser cette commande."
