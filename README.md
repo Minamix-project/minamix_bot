@@ -152,7 +152,12 @@ also has direct field-edit buttons. Quick dates include ten minutes, one hour
 and tomorrow at 18:00. Channel and member selection use native Discord menus;
 up to ten additional members can be selected, with separate controls for the
 creator's mention and clearing mentions. DM delivery skips the member step and
-clears additional recipients.
+clears additional recipients. **Mentions** remains available in the final review,
+including when editing a DM reminder. It explains private delivery and offers a
+channel picker or the current channel before showing the member selector. Channel
+permissions are checked before accepting that change. No reminder categories are
+shown or selectable; cards and delivery messages use a generic reminder title.
+Legacy category metadata is retained internally so existing data needs no rewrite.
 
 `/reminder` opens the private manager, including empty states. Select a
 reminder by its text, personal number, date and destination to see its full

@@ -43,13 +43,14 @@ def test_text_validation_and_dm_recipients():
         validate_reminder(reminder(channel_id=None, recipient_ids=(4,)))
 
 
-def test_channel_delivery_only_allows_explicit_user_mentions():
+@pytest.mark.parametrize("category", ["custom", "staff_meeting", "rp_event"])
+def test_channel_delivery_only_allows_explicit_user_mentions(category):
     bot, _guild, _owner, _guest, channel = setup_destination()
-    asyncio.run(delivery.send_reminder(bot, reminder(recipient_ids=(4,))))
+    asyncio.run(delivery.send_reminder(bot, reminder(recipient_ids=(4,), category=category)))
     kwargs = channel.send.await_args.kwargs
     assert kwargs["content"] == "<@2> <@4>"
     assert kwargs["embed"].description == "Check @everyone <@&9> <@99>"
-    assert kwargs["embed"].title == "⏰ Rappel personnalisé"
+    assert kwargs["embed"].title == "⏰ Rappel"
     assert kwargs["embed"].fields[0].name == "Prévu pour le"
     assert kwargs["embed"].footer.text == "Rappel #1 · Créé par Creator"
     mentions = kwargs["allowed_mentions"].to_dict()

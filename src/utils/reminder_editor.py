@@ -27,7 +27,10 @@ class ReminderEditor(ReminderView):
                 description={0: "Écris le message que tu souhaites recevoir.",
                              1: "Choisis un délai rapide ou indique une date personnalisée.",
                              2: "Où souhaites-tu recevoir ce rappel ?",
-                             3: "Sélectionne les membres à mentionner, sans saisir leurs identifiants.",
+                             3: ("Sélectionne les membres à mentionner, sans saisir leurs identifiants."
+                                 if self.draft.channel_id is not None else
+                                 "Ce rappel est envoyé en message privé, uniquement à toi.\n"
+                                 "Pour mentionner d'autres membres, choisis un salon d'envoi ci-dessous."),
                              4: "Vérifie le message, la date et la destination."}[self.step], color=discord.Color.blurple())
             if self.draft.message:
                 embed.add_field(name="Message", value=self.draft.message, inline=False)
@@ -35,7 +38,7 @@ class ReminderEditor(ReminderView):
                 embed.add_field(name="Date", value=f"<t:{self.draft.due_at}:F> (<t:{self.draft.due_at}:R>)", inline=False)
             if self.step >= 2:
                 embed.add_field(name="Destination", value=f"<#{self.draft.channel_id}>" if self.draft.channel_id else "Message privé")
-            if self.step == 3:
+            if self.step == 3 and self.draft.channel_id is not None:
                 ids = self.draft.recipient_ids
                 embed.add_field(name="Membres sélectionnés", value=" ".join(f"<@{value}>" for value in ids) or "Aucun", inline=False)
         embed.set_footer(text=f"Étape {self.step + 1}/5 · Fuseau : {self.draft.timezone} · Rien n'est enregistré avant validation")
@@ -66,24 +69,26 @@ class ReminderEditor(ReminderView):
             channels.callback = self.choose_channel
             self.add_item(channels)
         elif self.step == 3:
-            users = discord.ui.UserSelect(placeholder="Membres à mentionner (10 maximum)", min_values=0, max_values=10, row=0,
-                default_values=[discord.SelectDefaultValue(id=value, type=discord.SelectDefaultValueType.user)
-                                for value in self.draft.recipient_ids])
-            users.callback = self.choose_members
-            self.add_item(users)
-            self.button("Me mentionner : " + ("oui" if self.draft.mention_owner else "non"), self.toggle_owner, row=1)
-            self.button("Retirer toutes les mentions", self.clear_mentions, row=1)
+            if self.draft.channel_id is None:
+                channels = discord.ui.ChannelSelect(placeholder="Choisir le salon où envoyer le rappel",
+                    channel_types=[discord.ChannelType.text], row=0)
+                channels.callback = self.choose_channel
+                self.add_item(channels)
+                self.button("Utiliser le salon actuel", self.use_current_channel, row=1)
+            else:
+                users = discord.ui.UserSelect(placeholder="Membres à mentionner (10 maximum)", min_values=0, max_values=10, row=0,
+                    default_values=[discord.SelectDefaultValue(id=value, type=discord.SelectDefaultValueType.user)
+                                    for value in self.draft.recipient_ids])
+                users.callback = self.choose_members
+                self.add_item(users)
+                self.button("Me mentionner : " + ("oui" if self.draft.mention_owner else "non"), self.toggle_owner, row=1)
+                self.button("Retirer toutes les mentions", self.clear_mentions, row=1)
         elif self.step == 4:
-            select = discord.ui.Select(placeholder="Catégorie (facultatif)", row=0, options=[
-                discord.SelectOption(label=label, value=key, default=key == self.draft.category)
-                for key, label in store.CATEGORIES.items()])
-            select.callback = self.choose_category
-            self.add_item(select)
             for label, step in (("Message", 0), ("Date", 1), ("Destination", 2), ("Mentions", 3)):
                 async def jump(interaction, target=step):
                     self.step = target
                     await self.redraw(interaction)
-                self.button(label, jump, row=1, disabled=step == 3 and self.draft.channel_id is None)
+                self.button(label, jump, row=1)
             self.button("Enregistrer" if self.editing else "Programmer le rappel", self.save,
                         style=discord.ButtonStyle.success, row=2)
         self.button("Retour", self.back, row=4)
@@ -118,7 +123,18 @@ class ReminderEditor(ReminderView):
         await self.redraw(interaction)
 
     async def choose_channel(self, interaction):
-        self.draft = replace(self.draft, channel_id=int(interaction.data["values"][0]))
+        await self.set_channel(interaction, int(interaction.data["values"][0]))
+
+    async def use_current_channel(self, interaction):
+        if not isinstance(interaction.channel, discord.TextChannel):
+            raise ValueError("Choisis un salon textuel dans le menu ci-dessus.")
+        await self.set_channel(interaction, interaction.channel_id)
+
+    async def set_channel(self, interaction, channel_id):
+        await interaction.response.defer()
+        candidate = replace(self.draft, channel_id=channel_id)
+        await validate_destination(interaction.client, candidate)
+        self.draft = candidate
         await self.redraw(interaction)
 
     async def choose_members(self, interaction):
@@ -131,10 +147,6 @@ class ReminderEditor(ReminderView):
 
     async def clear_mentions(self, interaction):
         self.draft = replace(self.draft, recipient_ids=(), mention_owner=False)
-        await self.redraw(interaction)
-
-    async def choose_category(self, interaction):
-        self.draft = replace(self.draft, category=interaction.data["values"][0])
         await self.redraw(interaction)
 
     async def back(self, interaction):

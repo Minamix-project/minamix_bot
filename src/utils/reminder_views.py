@@ -54,7 +54,7 @@ class ReminderDashboard(ReminderView):
         for record in self.records[self.page * 5:self.page * 5 + 5]:
             target = f"<#{record.channel_id}>" if record.channel_id else "Message privé"
             previous = " · ancienne série" if record.generation != self.preferences["generation"] else ""
-            embed.add_field(name=f"#{record.reference} · {store.CATEGORIES[record.category]}{previous}",
+            embed.add_field(name=f"Rappel #{record.reference}{previous}",
                 value=f"{record.message[:220]}\n<t:{record.due_at}:F> (<t:{record.due_at}:R>) · {target}" +
                       ("\n📨 En cours d'envoi" if record.status == "sending" else ""), inline=False)
         embed.set_footer(text=f"Page {self.page + 1}/{max(1, (len(self.records) + 4) // 5)} · "

@@ -137,6 +137,67 @@ def test_switching_draft_to_dm_clears_recipients_and_skips_mentions_step(monkeyp
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("editing", [False, True])
+@pytest.mark.parametrize("channel_choice", ["menu", "current"])
+def test_review_mentions_can_switch_a_dm_to_channel_and_save_selected_members(monkeypatch, editing, channel_choice):
+    async def scenario():
+        wizard = editor.ReminderEditor(reminder(channel_id=None), step=4, editing=editing)
+        create, edit = AsyncMock(return_value=1), AsyncMock(return_value=True)
+        monkeypatch.setattr(store, "create_reminder", create)
+        monkeypatch.setattr(store, "edit_reminder", edit)
+        monkeypatch.setattr(store, "get_owned_reminder", AsyncMock(return_value=reminder(recipient_ids=(4,))))
+        button = next(item for item in wizard.children if isinstance(item, discord.ui.Button) and item.label == "Mentions")
+        assert not button.disabled
+        assert not any(isinstance(item, discord.ui.Select) for item in wizard.children)
+        assert all(field.name != "Catégorie" for field in wizard.embed().fields)
+        await button.callback(interaction())
+        assert wizard.step == 3
+        assert "message privé" in wizard.embed().description
+        selector = next(item for item in wizard.children if isinstance(item, discord.ui.ChannelSelect))
+        inter = interaction()
+        if channel_choice == "menu":
+            inter.data = {"values": ["3"]}
+            await selector.callback(inter)
+        else:
+            await wizard.use_current_channel(inter)
+        assert wizard.step == 3 and wizard.draft.channel_id == 3
+        users = next(item for item in wizard.children if isinstance(item, discord.ui.UserSelect))
+        inter = interaction()
+        inter.data = {"values": ["4"]}
+        await users.callback(inter)
+        await wizard.next(interaction())
+        assert wizard.step == 4 and wizard.draft.recipient_ids == (4,)
+        assert any("<@4>" in field.value for field in wizard.embed().fields)
+        await wizard.save(interaction())
+        saved = edit.await_args.args[0] if editing else create.await_args.args[0]
+        assert saved.channel_id == 3 and saved.recipient_ids == (4,)
+        (create if editing else edit).assert_not_awaited()
+    asyncio.run(scenario())
+
+
+def test_mentions_destination_checks_permissions_before_replacing_the_dm_draft():
+    async def scenario():
+        wizard = editor.ReminderEditor(reminder(channel_id=None), step=3)
+        inter = interaction()
+        inter.data = {"values": ["3"]}
+        inter.channel.permissions_for.return_value = discord.Permissions.none()
+        with pytest.raises(ValueError, match="salon de destination"):
+            await wizard.choose_channel(inter)
+        assert wizard.draft.channel_id is None and wizard.draft.recipient_ids == ()
+    asyncio.run(scenario())
+
+
+def test_legacy_categories_are_not_shown_in_the_dashboard_or_reminder_cards():
+    async def scenario():
+        record = reminder(category="deadline", message="Vérifie les annonces")
+        dashboard = views.ReminderDashboard(1, 2, [record], {"timezone": "Europe/Brussels", "generation": 0})
+        details = views.ReminderDetails(record)
+        for embed in (dashboard.embed(), details.embed()):
+            assert "Échéance" not in str(embed.to_dict())
+            assert all(field.name != "Catégorie" for field in embed.fields)
+    asyncio.run(scenario())
+
+
 def test_past_bare_time_requires_an_explicit_choice_of_tomorrow():
     now = datetime(2026, 11, 24, 20, tzinfo=timezone.utc)
     with pytest.raises(PastTimeError) as caught:

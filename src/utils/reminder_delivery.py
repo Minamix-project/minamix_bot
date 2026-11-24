@@ -2,7 +2,7 @@
 
 import discord
 
-from src.utils.reminders import CATEGORIES, Reminder
+from src.utils.reminders import Reminder
 
 # Translate failures stored by the first release without rewriting reminder data.
 _DELIVERY_ERRORS = {
@@ -84,7 +84,7 @@ async def send_reminder(bot: discord.Client, reminder: Reminder) -> None:
     if reminder.mention_owner and reminder.user_id not in ids:
         ids.insert(0, reminder.user_id)
     embed = discord.Embed(
-        title=f"⏰ {CATEGORIES[reminder.category]}",
+        title="⏰ Rappel",
         description=reminder.message,
         color=discord.Color.blurple(),
     )

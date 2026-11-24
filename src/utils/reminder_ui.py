@@ -24,7 +24,6 @@ def reminder_embed(reminder, *, title=None):
     embed.add_field(name="Personnes mentionnées" if reminder.channel_id else "Destinataire",
                     value=(" ".join(f"<@{value}>" for value in ids) or "Aucune") if reminder.channel_id else "Toi uniquement, en message privé",
                     inline=False)
-    embed.add_field(name="Catégorie", value=store.CATEGORIES[reminder.category])
     embed.add_field(name="État", value=STATUSES[reminder.status])
     embed.set_footer(text=f"Fuseau : {reminder.timezone} · Numéro personnel à ce serveur")
     if reminder.last_error:
