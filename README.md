@@ -164,6 +164,30 @@ Migration `0023_reminder_titles` derives titles from the existing messages while
 preserving their full contents and schedules. Title edits and postponements keep
 the title and message separate.
 
+The Date step includes an optional **Pré-rappel** selector: none (the default),
+10, 30, or 60 minutes, or two hours before the main reminder. The final review
+shows the chosen lead time and offers a **Pré-rappel** button to change it. A
+new selection or schedule whose advance time has already passed must be changed
+or disabled before saving. Existing reminders keep advance notices disabled
+when migration `0024_reminder_advance_notice` is applied automatically at startup.
+
+Advance notices use the same message, destination and selected mentions, with
+a separate French heading and the main reminder's scheduled date. They do not
+create another visible reminder number or expose snooze buttons before the main
+delivery. Their state appears in the reminder card. A sent notice leaves the
+main reminder pending; an advance-notice failure also leaves the main reminder
+scheduled and is reported separately. Retries never defer a main reminder that
+has become due. Restart recovery catches up a still-relevant notice, but skips
+obsolete notices once the main date is due. Delivery retains the normal lease
+and retry safeguards, including their normal recovery delay after interruption.
+
+Changing the date or lead time recalculates the notice. Changing only the text,
+title, destination or mentions does not resend a notice already sent. Deletion
+and personal reset cancel both stages; mutation is refused while either stage
+is actively sending. Postponing a pending reminder or snoozing a delivered one
+retains the selected lead time; a short postponement whose advance time is
+already past skips the notice and explicitly shows that state in the card.
+
 `/reminder` opens the private manager, including empty states. Select a
 reminder by its personal number and title, with its date and destination in the
 menu description, to see its full

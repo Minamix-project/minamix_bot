@@ -27,16 +27,16 @@ async def deliver_claimed_reminder(bot, reminder) -> None:
         detail = delivery_error_message(
             str(exc) if isinstance(exc, ValueError) else "Discord denied delivery or the destination was removed."
         )
-        await finish_reminder(reminder, int(time.time()), error=detail, permanent=True)
-        await notify_failure(bot, reminder)
+        if await finish_reminder(reminder, int(time.time()), error=detail, permanent=True):
+            await notify_failure(bot, reminder)
     except Exception as exc:
         # Do not persist raw API responses or reminder contents in error fields.
-        await finish_reminder(
+        saved = await finish_reminder(
             reminder, int(time.time()),
             error=delivery_error_message("Temporary delivery failure. Please try again later."),
         )
         await report_error(bot, guild_ids=reminder.guild_id, source=f"reminder:{reminder.id}", error=exc)
-        if reminder.attempts >= MAX_ATTEMPTS:
+        if saved and reminder.attempts >= MAX_ATTEMPTS:
             await notify_failure(bot, reminder)
     else:
         await finish_reminder(reminder, int(time.time()))
@@ -47,8 +47,11 @@ async def notify_failure(bot, reminder) -> None:
         user = bot.get_user(reminder.user_id) or await bot.fetch_user(reminder.user_id)
         guild = bot.get_guild(reminder.guild_id)
         origin = f" sur **{discord.utils.escape_markdown(guild.name)}**" if guild is not None and isinstance(guild.name, str) else ""
+        advance = reminder.delivery_kind == "advance"
+        label = "pré-rappel" if advance else "rappel"
         await user.send(
-            f"Le rappel #{reminder.reference}{origin} n'a pas pu être envoyé. "
+            f"Le {label} #{reminder.reference}{origin} n'a pas pu être envoyé. "
+            + ("Le rappel principal reste programmé. " if advance else "") +
             "Utilise `/reminder` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
             allowed_mentions=discord.AllowedMentions.none(),
         )

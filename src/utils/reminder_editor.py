@@ -8,9 +8,13 @@ import discord
 from src.utils import reminders as store
 from src.utils.reminder_delivery import validate_destination
 from src.utils.reminder_time import PastTimeError, parse_reminder_time
-from src.utils.reminder_ui import NO_MENTIONS, STALE, ReminderModal, ReminderView, present, reminder_embed
+from src.utils.reminder_ui import NO_MENTIONS, STALE, ReminderModal, ReminderView, advance_description, present, reminder_embed
 
 STEPS = ("Titre et message", "Date", "Destination", "Mentions", "Vérification")
+
+
+def with_date(draft, due_at):
+    return store.configure_advance(replace(draft, due_at=due_at)) if draft.due_at != due_at else draft
 
 
 class ReminderEditor(ReminderView):
@@ -38,6 +42,8 @@ class ReminderEditor(ReminderView):
                 embed.add_field(name="Message", value=self.draft.message, inline=False)
             if self.draft.due_at:
                 embed.add_field(name="Date", value=f"<t:{self.draft.due_at}:F> (<t:{self.draft.due_at}:R>)", inline=False)
+            if self.step == 1:
+                embed.add_field(name="Pré-rappel", value=advance_description(self.draft), inline=False)
             if self.step >= 2:
                 embed.add_field(name="Destination", value=f"<#{self.draft.channel_id}>" if self.draft.channel_id else "Message privé")
             if self.step == 3 and self.draft.channel_id is not None:
@@ -59,6 +65,11 @@ class ReminderEditor(ReminderView):
             ])
             select.callback = self.choose_time
             self.add_item(select)
+            advance = discord.ui.Select(placeholder="Pré-rappel facultatif (désactivé par défaut)", row=1, options=[
+                discord.SelectOption(label=label, value=str(minutes), default=minutes == self.draft.advance_minutes)
+                for minutes, label in store.ADVANCE_CHOICES.items()])
+            advance.callback = self.choose_advance
+            self.add_item(advance)
         elif self.step == 2:
             select = discord.ui.Select(placeholder="Destination du rappel", row=0, options=[
                 discord.SelectOption(label="Message privé", value="dm"),
@@ -93,6 +104,7 @@ class ReminderEditor(ReminderView):
                 self.button(label, jump, row=1)
             self.button("Enregistrer" if self.editing else "Programmer le rappel", self.save,
                         style=discord.ButtonStyle.success, row=2)
+            self.button("Pré-rappel", self.edit_advance, row=2)
         self.button("Retour", self.back, row=4)
         if self.step < 4:
             self.button("Continuer", self.next, style=discord.ButtonStyle.primary, row=4)
@@ -110,8 +122,23 @@ class ReminderEditor(ReminderView):
         if value == "custom":
             await interaction.response.send_modal(DateModal(self))
         else:
-            self.draft = replace(self.draft, due_at=parse_reminder_time(value, self.draft.timezone))
+            self.draft = with_date(self.draft, parse_reminder_time(value, self.draft.timezone))
             await self.redraw(interaction)
+
+    async def choose_advance(self, interaction):
+        minutes = int(interaction.data["values"][0])
+        if minutes not in store.ADVANCE_CHOICES:
+            raise ValueError("Choisis un des délais de pré-rappel proposés.")
+        if minutes and minutes != self.draft.advance_minutes and self.draft.due_at - minutes * 60 <= time.time():
+            await self.redraw(interaction)
+            raise ValueError("Ce pré-rappel serait déjà passé. Choisis une date plus éloignée ou un délai plus court.")
+        if minutes != self.draft.advance_minutes:
+            self.draft = store.configure_advance(replace(self.draft, advance_minutes=minutes))
+        await self.redraw(interaction)
+
+    async def edit_advance(self, interaction):
+        self.step = 1
+        await self.redraw(interaction)
 
     async def choose_destination(self, interaction):
         value = interaction.data["values"][0]
@@ -185,17 +212,20 @@ class ReminderEditor(ReminderView):
             reminder = store.validate_reminder(self.draft)
             if reminder.due_at <= time.time():
                 raise ValueError("La date est passée. Reviens à l'étape Date pour choisir un nouvel horaire.")
+            current = await self.current(reminder.id, revision=reminder.revision) if self.editing else None
+            unchanged = current is not None and (current.due_at, current.advance_minutes) == (reminder.due_at, reminder.advance_minutes)
+            if reminder.advance_minutes and reminder.advance_at <= time.time() and not unchanged:
+                raise ValueError("Le pré-rappel serait déjà passé. Modifie sa durée ou désactive-le avec le bouton Pré-rappel.")
             await validate_destination(interaction.client, reminder)
             if self.editing:
-                await self.current(reminder.id, revision=reminder.revision)
                 if not await store.edit_reminder(reminder):
                     raise ValueError(STALE)
-                reminder = replace(reminder, revision=reminder.revision + 1, status="pending", last_error=None)
+                reminder_id = reminder.id
             else:
                 reminder_id = await store.create_reminder(reminder, expected_generation=reminder.generation)
-                reminder = await store.get_owned_reminder(reminder_id, self.guild_id, self.owner_id)
-                if reminder is None:
-                    raise ValueError(STALE)
+            reminder = await store.get_owned_reminder(reminder_id, self.guild_id, self.owner_id)
+            if reminder is None:
+                raise ValueError(STALE)
             from src.utils.reminder_views import ReminderDetails
             await self.move(interaction, ReminderDetails(reminder, notice="✅ Rappel enregistré."))
         finally:
@@ -235,7 +265,7 @@ class DateModal(ReminderModal):
         except PastTimeError as exc:
             await self.parent.move(interaction, TomorrowChoice(self.parent.draft, exc.tomorrow, editing=self.parent.editing))
             return
-        self.parent.draft = replace(self.parent.draft, due_at=due_at)
+        self.parent.draft = with_date(self.parent.draft, due_at)
         await self.parent.redraw(interaction)
 
 
@@ -252,7 +282,7 @@ class TomorrowChoice(ReminderView):
 
     async def confirm(self, interaction):
         due_at = parse_reminder_time(self.tomorrow, self.draft.timezone)
-        await self.move(interaction, ReminderEditor(replace(self.draft, due_at=due_at), step=4, editing=self.editing))
+        await self.move(interaction, ReminderEditor(with_date(self.draft, due_at), step=4, editing=self.editing))
 
     async def back(self, interaction):
         await self.move(interaction, ReminderEditor(self.draft, step=1, editing=self.editing))

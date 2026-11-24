@@ -128,7 +128,7 @@ def test_mysql_number_allocation_rolls_back_when_creation_commit_fails(monkeypat
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("migration_cutoff", ["0022", "0023"])
+@pytest.mark.parametrize("migration_cutoff", ["0022", "0023", "0024"])
 def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_delivery_state(monkeypatch, tmp_path, migration_cutoff):
     from src.core import schema_migrations
     current = Path("src/migrations")
@@ -151,13 +151,16 @@ def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_deli
             bodies[30] = "Un ancien titre très long " + "texte " * 40
             async with db.cursor() as cursor:
                 for rid, gid, uid in [(100, 1, 2), (150, 1, 2), (20, 1, 3), (30, 999, 2)]:
-                    extra_column = ", personal_number" if migration_cutoff == "0023" else ""
-                    extra_value = ", %s" if migration_cutoff == "0023" else ""
-                    args = (rid, gid, uid, bodies[rid], *((2 if rid == 150 else 1,) if extra_column else ()))
+                    extras = {"personal_number": 2 if rid == 150 else 1} if migration_cutoff >= "0023" else {}
+                    if migration_cutoff >= "0024":
+                        extras["title"] = " ".join(bodies[rid].split())[:80]
+                    extra_column = "".join(", " + name for name in extras)
+                    extra_value = ", %s" * len(extras)
+                    args = (rid, gid, uid, bodies[rid], *extras.values())
                     await cursor.execute(
                         "INSERT INTO guild_reminders (id, guild_id, user_id, channel_id, due_at, message, recipient_ids" + extra_column + ") "
                         "VALUES (%s, %s, %s, 77, 2000000000, %s, JSON_ARRAY(7)" + extra_value + ")", args)
-                if migration_cutoff == "0023":
+                if migration_cutoff >= "0023":
                     await cursor.execute("INSERT INTO reminder_preferences (guild_id, user_id, next_number) "
                                          "SELECT guild_id, user_id, MAX(personal_number) + 1 FROM guild_reminders GROUP BY guild_id, user_id")
                 await cursor.execute("UPDATE guild_reminders SET status = 'sending', claim_token = 'existing-claim', claimed_until = 2000000300, attempts = 2 WHERE id = 150")
@@ -171,6 +174,8 @@ def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_deli
                 assert [row["personal_number"] for row in rows] == [1, 1, 1, 2]
                 assert all(row["message"] == bodies[row["id"]] and row["due_at"] == 2000000000 for row in rows)
                 assert all(row["title"] == " ".join(bodies[row["id"]].split())[:80] for row in rows)
+                assert all(row["advance_minutes"] == 0 and row["advance_status"] == "disabled"
+                           and row["delivery_kind"] == "main" and row["next_delivery_at"] == row["due_at"] for row in rows)
                 assert rows[-1]["claim_token"] == "existing-claim" and rows[-1]["attempts"] == 2 and rows[-1]["status"] == "sending"
                 await cursor.execute("SELECT next_number FROM reminder_preferences WHERE guild_id = 1 AND user_id = 2")
                 assert (await cursor.fetchone())["next_number"] == 3

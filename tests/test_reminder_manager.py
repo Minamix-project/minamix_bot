@@ -95,8 +95,11 @@ def test_full_wizard_uses_native_member_selection_and_saves_only_after_confirmat
         await modal.on_submit(interaction())
         await wizard.next(interaction())
         inter = interaction()
-        inter.data = {"values": ["10m"]}
+        inter.data = {"values": ["demain 18:00"]}
         await wizard.choose_time(inter)
+        inter = interaction()
+        inter.data = {"values": ["30"]}
+        await wizard.choose_advance(inter)
         await wizard.next(interaction())
         inter = interaction()
         inter.data = {"values": ["3"]}
@@ -121,6 +124,7 @@ def test_full_wizard_uses_native_member_selection_and_saves_only_after_confirmat
         assert create.await_args.args[0].recipient_ids == (4, 5)
         assert create.await_args.args[0].title == "Réunion du staff"
         assert create.await_args.args[0].message == "Réunion"
+        assert create.await_args.args[0].advance_minutes == 30
         assert isinstance(inter.edit_original_response.await_args.kwargs["view"], views.ReminderDetails)
         with pytest.raises(ValueError):
             await wizard.save(interaction())

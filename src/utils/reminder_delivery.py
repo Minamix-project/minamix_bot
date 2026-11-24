@@ -83,19 +83,22 @@ async def send_reminder(bot: discord.Client, reminder: Reminder) -> None:
     ids = list(reminder.recipient_ids)
     if reminder.mention_owner and reminder.user_id not in ids:
         ids.insert(0, reminder.user_id)
+    advance = reminder.delivery_kind == "advance"
     embed = discord.Embed(
-        title=f"⏰ {reminder.display_title}",
+        title=f"🔔 Pré-rappel · {reminder.display_title}" if advance else f"⏰ {reminder.display_title}",
         description=reminder.message,
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="Prévu pour le", value=f"<t:{reminder.due_at}:F>")
+    embed.add_field(name="Rappel principal prévu pour" if advance else "Prévu pour le", value=f"<t:{reminder.due_at}:F> (<t:{reminder.due_at}:R>)")
+    if advance:
+        embed.add_field(name="Pré-rappel", value=f"{reminder.advance_minutes} minutes avant", inline=False)
     embed.add_field(name="Serveur d'origine", value=str(guild.name))
     embed.set_footer(text=f"Rappel #{reminder.reference} · Créé par {owner.display_name}")
     from src.utils.reminder_actions import snooze_view
     await target.send(
         content=" ".join(f"<@{user_id}>" for user_id in ids) or None,
         embed=embed,
-        view=snooze_view(reminder),
+        view=None if advance else snooze_view(reminder),
         allowed_mentions=discord.AllowedMentions(
             everyone=False, roles=False, users=[discord.Object(id=user_id) for user_id in ids], replied_user=False,
         ),

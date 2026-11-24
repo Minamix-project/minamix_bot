@@ -11,6 +11,19 @@ STALE = "Ce rappel a changé ou n'est plus disponible. Actualise `/reminder`."
 STATUSES = {"pending": "⏳ À venir", "sending": "📨 En cours d'envoi", "failed": "❌ Échec", "sent": "✅ Envoyé"}
 
 
+def advance_description(reminder):
+    if not reminder.advance_minutes:
+        return "Désactivé"
+    label = store.ADVANCE_CHOICES[reminder.advance_minutes]
+    if reminder.advance_status == "sent":
+        return f"{label} · envoyé" + (f" <t:{reminder.advance_sent_at}:R>" if reminder.advance_sent_at else "")
+    if reminder.advance_status == "failed":
+        return f"{label} · échec du pré-rappel"
+    if reminder.advance_status == "skipped":
+        return f"{label} · non envoyé : ce délai était déjà écoulé"
+    return f"{label}\n<t:{reminder.advance_at}:F> (<t:{reminder.advance_at}:R>)"
+
+
 def reminder_embed(reminder, *, title=None):
     from src.utils.reminder_delivery import delivery_error_message
 
@@ -26,10 +39,13 @@ def reminder_embed(reminder, *, title=None):
     embed.add_field(name="Personnes mentionnées" if reminder.channel_id else "Destinataire",
                     value=(" ".join(f"<@{value}>" for value in ids) or "Aucune") if reminder.channel_id else "Toi uniquement, en message privé",
                     inline=False)
-    embed.add_field(name="État", value=STATUSES[reminder.status])
+    embed.add_field(name="Pré-rappel", value=advance_description(reminder), inline=False)
+    embed.add_field(name="État", value="🔔 Envoi du pré-rappel" if reminder.status == "sending" and reminder.delivery_kind == "advance" else STATUSES[reminder.status])
     embed.set_footer(text=f"Fuseau : {reminder.timezone} · Numéro personnel à ce serveur")
     if reminder.last_error:
         embed.add_field(name="Pourquoi l'envoi a échoué ?", value=delivery_error_message(reminder.last_error), inline=False)
+    if reminder.advance_last_error:
+        embed.add_field(name="Problème du pré-rappel", value=delivery_error_message(reminder.advance_last_error), inline=False)
     return embed
 
 

@@ -56,7 +56,10 @@ class ReminderDashboard(ReminderView):
             previous = " · ancienne série" if record.generation != self.preferences["generation"] else ""
             embed.add_field(name=f"{record.label}{previous}",
                 value=f"<t:{record.due_at}:F> (<t:{record.due_at}:R>) · {target}" +
-                      ("\n📨 En cours d'envoi" if record.status == "sending" else ""), inline=False)
+                      ("\n🔔 Envoi du pré-rappel" if record.status == "sending" and record.delivery_kind == "advance"
+                       else "\n📨 En cours d'envoi" if record.status == "sending"
+                       else "\n⚠️ Pré-rappel échoué ; rappel principal maintenu" if record.status == "pending" and record.advance_status == "failed"
+                       else ""), inline=False)
         embed.set_footer(text=f"Page {self.page + 1}/{max(1, (len(self.records) + 4) // 5)} · "
                          f"Fuseau : {self.preferences['timezone']} · Historique conservé 30 jours")
         return embed
