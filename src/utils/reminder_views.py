@@ -216,7 +216,7 @@ class TimezoneSettings(ReminderView):
         self.timezone = timezone
         select = discord.ui.Select(placeholder="Ton fuseau horaire", options=[
             discord.SelectOption(label=label, value=value) for label, value in (
-                ("Belgique · Bruxelles", "Europe/Brussels"), ("France · Paris", "Europe/Paris"),
+                ("Paris / Bruxelles", "Europe/Brussels"),
                 ("Québec · Montréal", "America/Montreal"), ("Temps universel · UTC", "UTC"))])
         select.callback = self.choose
         self.add_item(select)
