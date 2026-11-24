@@ -1,7 +1,5 @@
 """Validate destinations and restrict reminder mentions to explicitly selected users."""
 
-import re
-
 import discord
 
 from src.utils.reminders import CATEGORIES, Reminder
@@ -31,24 +29,6 @@ def delivery_error_message(detail: str) -> str:
     if detail in _DELIVERY_ERRORS.values():
         return detail
     return "L'envoi du rappel a échoué. Vérifie sa destination et les permissions, puis réessaie."
-
-
-def parse_recipients(value: str) -> tuple[int, ...]:
-    if value.strip().lower() in {"aucun", "none"}:
-        return ()
-    ids = []
-    for token in re.split(r"[\s,]+", value.strip()):
-        match = re.fullmatch(r"(?:<@!?(\d{1,20})>|(\d{1,20}))", token)
-        if not match:
-            raise ValueError("Utilise des mentions ou identifiants de membres séparés par des espaces, ou 'aucun'.")
-        user_id = int(match[1] or match[2])
-        if not 0 < user_id < 2**64:
-            raise ValueError("Identifiant de membre invalide.")
-        if user_id not in ids:
-            ids.append(user_id)
-    if len(ids) > 10:
-        raise ValueError("Sélectionne au maximum 10 membres supplémentaires.")
-    return tuple(ids)
 
 
 async def resolve_member(guild: discord.Guild, user_id: int) -> discord.Member | None:

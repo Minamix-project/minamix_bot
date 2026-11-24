@@ -61,18 +61,19 @@ def test_dashboard_labels_use_personal_numbers_text_and_dates_without_exposing_g
     asyncio.run(scenario())
 
 
-def test_create_without_parameters_opens_the_assistant_and_keeps_saved_timezone(monkeypatch):
+def test_create_button_opens_the_assistant_and_keeps_saved_timezone(monkeypatch):
     async def scenario():
         inter = interaction()
-        monkeypatch.setattr(command, "get_preferences", AsyncMock(return_value={"timezone": "America/Montreal", "generation": 3}))
+        preferences = {"timezone": "America/Montreal", "generation": 3}
+        monkeypatch.setattr(views.store, "get_preferences", AsyncMock(return_value=preferences))
         create = AsyncMock()
-        monkeypatch.setattr(command, "create_reminder", create)
-        group = command.Remind()
-        await group.create.callback(group, inter)
-        wizard = inter.followup.send.await_args.kwargs["view"]
+        monkeypatch.setattr(views.store, "create_reminder", create)
+        dashboard = views.ReminderDashboard(1, 2, [], preferences)
+        await dashboard.create(inter)
+        wizard = inter.edit_original_response.await_args.kwargs["view"]
         assert isinstance(wizard, editor.ReminderEditor)
         assert wizard.draft.timezone == "America/Montreal" and wizard.draft.generation == 3
-        assert wizard.step == 0 and inter.followup.send.await_args.kwargs["ephemeral"]
+        assert wizard.step == 0 and wizard.draft.channel_id is None
         create.assert_not_awaited()
     asyncio.run(scenario())
 
@@ -153,17 +154,48 @@ def test_past_bare_time_requires_an_explicit_choice_of_tomorrow():
     asyncio.run(scenario())
 
 
-def test_autocomplete_uses_only_owned_mutable_reminders_and_stable_references(monkeypatch):
+def test_only_reminder_command_opens_the_private_manager_without_arguments(monkeypatch):
     async def scenario():
-        records = [reminder(id=999, personal_number=1, message="Réunion"), reminder(id=998, personal_number=2, status="sending")]
-        listing = AsyncMock(return_value=records)
-        monkeypatch.setattr(command, "list_reminders", listing)
-        group = command.Remind()
-        choices = await group.reminder_choices(interaction(), "réun")
-        listing.assert_awaited_once_with(1, 2)
-        assert len(choices) == 1 and choices[0].value == "r:999"
-        assert choices[0].name.startswith("#1 ·")
-        assert group.parse_id("#1") == group.parse_id("1") == 1
+        from discord.ext import commands
+        dashboard = views.ReminderDashboard(1, 2, [], {"timezone": "Europe/Brussels", "generation": 0})
+        load = AsyncMock(return_value=dashboard)
+        monkeypatch.setattr(command.ReminderDashboard, "load", load)
+        inter = interaction()
+        async with commands.Bot(command_prefix="!", intents=discord.Intents.default()) as bot:
+            await command.register(bot)
+            action = bot.tree.get_command("reminder")
+            assert not isinstance(action, discord.app_commands.Group)
+            assert action.parameters == []
+            await action.callback(inter)
+        load.assert_awaited_once_with(1, 2, guild=inter.guild)
+        inter.response.defer.assert_awaited_once_with(ephemeral=True)
+        sent = inter.followup.send.await_args.kwargs
+        assert sent["view"] is dashboard and sent["ephemeral"]
+    asyncio.run(scenario())
+
+
+def test_manager_command_errors_reply_once_without_a_false_technical_alert(monkeypatch):
+    async def scenario():
+        from discord import app_commands
+        from discord.ext import commands
+        from src.utils import command_errors, reminder_ui
+
+        report = AsyncMock()
+        monkeypatch.setattr(reminder_ui, "report_error", report)
+        monkeypatch.setattr(command_errors, "report_error", report)
+        monkeypatch.setattr(command.ReminderDashboard, "load", AsyncMock(side_effect=ValueError("Session indisponible")))
+        inter = interaction()
+        async with commands.Bot(command_prefix="!", intents=discord.Intents.default()) as bot:
+            await command.register(bot)
+            action = bot.tree.get_command("reminder")
+            inter.command = action
+            with pytest.raises(app_commands.CommandInvokeError) as caught:
+                await action._invoke_with_namespace(inter, SimpleNamespace())
+            await action._invoke_error_handlers(inter, caught.value)
+            await command_errors.handle_app_command_error(bot, inter, caught.value)
+        report.assert_not_awaited()
+        inter.followup.send.assert_awaited_once()
+        assert "Session indisponible" in inter.followup.send.await_args.args[0]
     asyncio.run(scenario())
 
 

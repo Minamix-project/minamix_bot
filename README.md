@@ -113,11 +113,7 @@ ownership for retries and use the configured technical error reporting.
 | `/back` | Clear your absence status |
 | `/absents` | List absent members — admin |
 | `/activity <user>` | View a member's activity — admin |
-| `/reminder create [when] [text] [...]` | Open the reminder assistant, or schedule directly with when and text |
-| `/reminder list` | Open your private reminder manager, delivery failures, history and preferences |
-| `/reminder edit <reminder_id> [...]` | Update one of your pending or failed reminders |
-| `/reminder delete <reminder_id>` | Select a personal reminder and confirm deletion |
-| `/reminder reset` | Confirm cancellation of your reminders in this server and restart numbering at #1 |
+| `/reminder` | Open the private reminder manager; all actions use buttons and menus |
 
 ### Repository statistics in status
 
@@ -140,15 +136,16 @@ in the current container. GitHub request failures are retried after two minutes.
 
 ### Reminders
 
-Commands and parameters remain in English; all user-facing descriptions,
-controls, forms and errors are in French. Existing scheduled reminders survive
-upgrade with their text, destination, mentions, due time, delivery status and
+The single `/reminder` command has no parameters or subcommands. Its name
+remains in English; all user-facing descriptions, controls, forms and errors
+are in French. Existing scheduled reminders survive upgrade with their text,
+destination, mentions, due time, delivery status and
 recovery lease unchanged. Migration `0022_reminder_manager` assigns personal
 numbers in creation order per member and server, while retaining stable internal
 IDs. Previously displayed global numbers are replaced by those personal numbers.
 No data deletion or manual database reset is needed.
 
-Use `/reminder create` without arguments for the private five-step assistant:
+Open `/reminder` and press **Créer un rappel** for the private five-step assistant:
 message, date, destination, member mentions, and a final review. Each step allows
 back navigation; nothing is scheduled until **Programmer le rappel**. The review
 also has direct field-edit buttons. Quick dates include ten minutes, one hour
@@ -157,32 +154,18 @@ up to ten additional members can be selected, with separate controls for the
 creator's mention and clearing mentions. DM delivery skips the member step and
 clears additional recipients.
 
-Fast scheduling and parameter-based edits remain available:
-
-```text
-/reminder create when:2h text:Vérifier les annonces
-/reminder create when:demain 18:00 text:Réunion du staff delivery:Salon actuel category:Réunion du staff
-/reminder create when:15/09/2027 20:00 text:Événement de guilde channel:#evenements recipients:@Alice @Bob
-/reminder edit reminder_id:#1 when:3h text:Nouvel horaire de réunion
-/reminder edit reminder_id:1 recipients:aucun mention:false
-/reminder delete reminder_id:#1
-```
-
-`/reminder list` opens the private manager, including empty states. Select a
+`/reminder` opens the private manager, including empty states. Select a
 reminder by its text, personal number, date and destination to see its full
 card. Buttons allow editing, ten-minute/hour postponement, deletion with
 confirmation, and returning to the list. **À venir**, **Échecs**, and **Envoyés
 récemment** tabs, pagination, refresh, timezone preferences and personal reset
 are available. History from an earlier reset cycle is labelled separately.
-The `edit` and `delete` shortcuts autocomplete only the member's mutable reminders
-and use stable internal references when a suggestion is selected; manual input
-accepts both `#1` and `1` for the current personal series. `edit` without changed
-fields opens the editor. A failed or overdue reminder opens at the date step
-instead of requiring the user to discover why an unchanged past date fails.
+A failed or overdue reminder opens at the date step instead of requiring the
+user to discover why an unchanged past date fails.
 
-**Réinitialiser mes rappels**, also available as `/reminder reset`, confirms
-cancellation of the member's pending and failed reminders in the current server
-and restarts the next visible number at #1. Other members, other servers, sent
+**Réinitialiser mes rappels** opens a private confirmation. Confirming cancels
+the member's pending and failed reminders in the current server and restarts
+the next visible number at #1. Other members, other servers, sent
 history and the saved timezone are retained. Reset is refused while a reminder
 is being sent or when the confirmation's reminder set has changed. Creation,
 number allocation and reset are transactional. Generations invalidate creation
@@ -198,10 +181,12 @@ are rejected. The member can save a timezone per server from common French-label
 choices or an IANA name; the default remains Europe/Brussels. Existing schedules
 retain their due time. Discord timestamps display in the reader's local timezone.
 
-Choosing `channel` implies channel delivery. The creator must see and send in
+The destination selector offers private messages, the current channel, or a
+native text-channel menu. The creator must see and send in
 the destination; the bot also needs Embed Links. Threads remain unsupported.
-Legacy `recipients` accepts mentions or IDs separated by spaces or commas, and
-`aucun`/`none` clears them. All selected members must see the channel; roles,
+Mentions use a native member selector and dedicated buttons to mention the
+creator or clear all mentions. No user IDs or text separators are needed.
+All selected members must see the channel; roles,
 @everyone and unselected users cannot be pinged. Creator-only delivered-message
 buttons **Reporter de 10 min / 1 heure** work in DMs and server channels, including
 after bot restart. Snoozing a delivered reminder creates one new personal reminder;

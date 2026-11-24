@@ -42,8 +42,6 @@ def test_mysql_personal_numbering_reset_preserves_other_users_and_history_and_in
         assert (await store.get_reminder(other_user, 1, 3)).reference == 1
         assert (await store.get_reminder(other_server, 999, 2)).reference == 1
         assert await store.get_owned_reminder(first, 1, 3) is None
-        assert (await store.resolve_reminder("#1", 1, 2)).id == first
-        assert (await store.resolve_reminder(f"r:{second}", 1, 2)).id == second
         ids = await asyncio.gather(*(store.create_reminder(original) for _ in range(5)))
         numbers = [(await store.get_reminder(value, 1, 2)).reference for value in ids]
         assert sorted(numbers) == [3, 4, 5, 6, 7]
@@ -85,7 +83,7 @@ def test_mysql_personal_numbering_reset_preserves_other_users_and_history_and_in
         new_id = await store.create_reminder(original)
         new = await store.get_reminder(new_id, 1, 2)
         assert new.reference == 1 and new.generation == 1 and new.id != first
-        assert (await store.resolve_reminder("#1", 1, 2)).id == new_id
+        assert (await store.get_owned_reminder(new_id, 1, 2, current_only=True)).id == new_id
         assert await store.get_owned_reminder(first, 1, 2, current_only=True) is None
         with pytest.raises(ValueError):
             await store.create_reminder(original, expected_generation=0)

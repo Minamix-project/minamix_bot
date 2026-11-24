@@ -187,31 +187,6 @@ async def get_owned_reminder(reminder_id, guild_id, user_id, *, current_only=Fal
         db.close()
 
 
-async def resolve_reminder(value, guild_id, user_id):
-    value = value.strip()
-    if value.startswith("r:"):
-        number = value[2:]
-        if len(number) <= 20 and number.isascii() and number.isdecimal() and 0 < int(number) < 2**64:
-            return await get_reminder(int(number), guild_id, user_id)
-        return None
-    number = value.removeprefix("#")
-    if len(number) > 20 or not number.isascii() or not number.isdecimal() or not 0 < int(number) < 2**64:
-        return None
-    db = await get_db_connection()
-    try:
-        async with db.cursor(aiomysql.DictCursor) as cursor:
-            await cursor.execute(
-                "SELECT r.* FROM guild_reminders r JOIN reminder_preferences p "
-                "ON p.guild_id = r.guild_id AND p.user_id = r.user_id AND p.generation = r.generation "
-                "WHERE r.guild_id = %s AND r.user_id = %s AND r.personal_number = %s AND r.status IN ('pending', 'failed')",
-                (guild_id, user_id, int(number)),
-            )
-            row = await cursor.fetchone()
-            return _from_row(row) if row else None
-    finally:
-        db.close()
-
-
 async def edit_reminder(reminder: Reminder) -> bool:
     reminder = validate_reminder(reminder)
     db = await get_db_connection()
@@ -285,10 +260,10 @@ async def snooze_reminder(source, due_at):
                                  (source.id, source.guild_id, source.user_id))
             row = await cursor.fetchone()
             if not row or row["status"] != "sent" or row["generation"] != preferences["generation"]:
-                raise ValueError("Ce rappel n'est plus disponible pour un report. Utilise `/reminder list` sur le serveur d'origine.")
+                raise ValueError("Ce rappel n'est plus disponible pour un report. Utilise `/reminder` sur le serveur d'origine.")
             await cursor.execute("SELECT id FROM guild_reminders WHERE parent_id = %s", (source.id,))
             if await cursor.fetchone():
-                raise ValueError("Ce rappel a déjà été reporté. Retrouve le report dans `/reminder list`.")
+                raise ValueError("Ce rappel a déjà été reporté. Retrouve le report dans `/reminder`.")
             fresh = _from_row(row)
             reminder_id = await _insert_reminder(cursor, replace(fresh, due_at=due_at, parent_id=source.id), preferences)
         await db.commit()

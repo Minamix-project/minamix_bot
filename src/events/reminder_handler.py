@@ -49,7 +49,7 @@ async def notify_failure(bot, reminder) -> None:
         origin = f" sur **{discord.utils.escape_markdown(guild.name)}**" if guild is not None and isinstance(guild.name, str) else ""
         await user.send(
             f"Le rappel #{reminder.reference}{origin} n'a pas pu être envoyé. "
-            "Utilise `/reminder list` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
+            "Utilise `/reminder` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:

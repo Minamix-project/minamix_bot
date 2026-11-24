@@ -7,7 +7,7 @@ from src.utils.views import ExpiringView
 from src.utils import reminders as store
 
 NO_MENTIONS = discord.AllowedMentions.none()
-STALE = "Ce rappel a changé ou n'est plus disponible. Actualise `/reminder list`."
+STALE = "Ce rappel a changé ou n'est plus disponible. Actualise `/reminder`."
 STATUSES = {"pending": "⏳ À venir", "sending": "📨 En cours d'envoi", "failed": "❌ Échec", "sent": "✅ Envoyé"}
 
 
@@ -69,14 +69,14 @@ class ReminderView(ExpiringView):
         if not await super().interaction_check(interaction):
             return False
         if interaction.guild_id != self.guild_id or self.is_finished():
-            await interaction.response.send_message("Cette session a expiré. Relance `/reminder list` ou `/reminder create`.", ephemeral=True)
+            await interaction.response.send_message("Cette session a expiré. Relance `/reminder`.", ephemeral=True)
             return False
         return True
 
     async def on_timeout(self):
         if self.message:
             try:
-                await self.message.edit(content="⏱️ Session expirée. Relance `/reminder list` ou `/reminder create`.", embed=None, view=None)
+                await self.message.edit(content="⏱️ Session expirée. Relance `/reminder`.", embed=None, view=None)
             except discord.HTTPException:
                 pass
 

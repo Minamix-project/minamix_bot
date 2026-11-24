@@ -35,18 +35,6 @@ def setup_destination():
     return bot, guild, owner, guest, channel
 
 
-@pytest.mark.parametrize("value,expected", [("<@2> <@!4>,2", (2, 4)), ("aucun", ()), ("none", ()), ("2 4", (2, 4))])
-def test_recipient_selection(value, expected):
-    assert delivery.parse_recipients(value) == expected
-
-
-@pytest.mark.parametrize("value", ["@everyone", "<@&123>", "member-name", "", "0", str(2**64),
-                                  " ".join(str(number) for number in range(1, 12))])
-def test_invalid_recipient_selection(value):
-    with pytest.raises(ValueError):
-        delivery.parse_recipients(value)
-
-
 def test_text_validation_and_dm_recipients():
     for text in (" ", "x" * 1001):
         with pytest.raises(ValueError):
@@ -126,30 +114,6 @@ def test_cancellation_leaves_the_lease_recoverable(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(handler.deliver_claimed_reminder(Mock(), reminder()))
     finish.assert_not_awaited()
-
-
-def test_creation_defaults_and_edit_to_dm_clear_recipients(monkeypatch):
-    from src.commands.general import remind as command
-
-    interaction = SimpleNamespace(
-        guild_id=1, user=SimpleNamespace(id=2), client=Mock(),
-        response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()),
-    )
-    validate = AsyncMock()
-    create, edit = AsyncMock(return_value=17), AsyncMock(return_value=True)
-    monkeypatch.setattr(command, "validate_destination", validate)
-    monkeypatch.setattr(command, "create_reminder", create)
-    monkeypatch.setattr(command, "edit_reminder", edit)
-    monkeypatch.setattr(command, "resolve_reminder", AsyncMock(return_value=reminder(recipient_ids=(4,))))
-    monkeypatch.setattr(command, "get_owned_reminder", AsyncMock(return_value=reminder(id=17, personal_number=1)))
-    monkeypatch.setattr(command, "get_preferences", AsyncMock(return_value={"timezone": "Europe/Brussels", "generation": 0}))
-    group = command.Remind()
-    asyncio.run(group.create.callback(group, interaction, "2h", "Check announcements"))
-    assert create.await_args.args[0].channel_id is None
-    assert interaction.response.defer.await_args.kwargs == {"ephemeral": True}
-    asyncio.run(group.edit.callback(group, interaction, "1", delivery="dm"))
-    assert edit.await_args.args[0].channel_id is None
-    assert edit.await_args.args[0].recipient_ids == ()
 
 
 def test_worker_starts_once_and_stops_on_cog_unload():
