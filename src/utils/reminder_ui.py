@@ -14,8 +14,10 @@ STATUSES = {"pending": "⏳ À venir", "sending": "📨 En cours d'envoi", "fail
 def reminder_embed(reminder, *, title=None):
     from src.utils.reminder_delivery import delivery_error_message
 
-    embed = discord.Embed(title=title or f"⏰ Rappel #{reminder.reference}", description=reminder.message,
+    embed = discord.Embed(title=title or f"⏰ {reminder.label}", description=reminder.message,
                           color=discord.Color.blurple())
+    if title is not None:
+        embed.add_field(name="Titre", value=reminder.display_title, inline=False)
     embed.add_field(name="Quand ?", value=f"<t:{reminder.due_at}:F>\n<t:{reminder.due_at}:R>")
     embed.add_field(name="Destination", value=f"<#{reminder.channel_id}>" if reminder.channel_id else "Message privé")
     ids = list(reminder.recipient_ids)

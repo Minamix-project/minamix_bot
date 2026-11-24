@@ -40,10 +40,22 @@ class Reminder:
     generation: int = 0
     timezone: str = "Europe/Brussels"
     parent_id: int | None = None
+    title: str = ""
 
     @property
     def reference(self):
         return self.personal_number or self.id
+
+    @property
+    def display_title(self):
+        return " ".join((self.title or self.message).split())[:80] or "Rappel"
+
+    @property
+    def label(self):
+        value = f"#{self.reference} · {self.display_title}"
+        while len(value.encode("utf-16-le")) // 2 > 100:
+            value = value[:-1]
+        return value
 
 
 def _from_row(row) -> Reminder:
@@ -56,6 +68,9 @@ def validate_reminder(reminder: Reminder) -> Reminder:
     message = reminder.message.strip()
     if not message or len(message) > 1000:
         raise ValueError("Le texte du rappel doit contenir entre 1 et 1 000 caractères.")
+    title = " ".join(reminder.title.split()) if reminder.title else " ".join(message.split())[:80]
+    if not title or len(title) > 80:
+        raise ValueError("Le titre du rappel doit contenir entre 1 et 80 caractères.")
     if reminder.category not in CATEGORIES:
         raise ValueError("Catégorie de rappel inconnue.")
     recipients = tuple(dict.fromkeys(reminder.recipient_ids))
@@ -63,13 +78,13 @@ def validate_reminder(reminder: Reminder) -> Reminder:
         raise ValueError("Sélectionne au maximum 10 membres supplémentaires.")
     if reminder.channel_id is None and recipients:
         raise ValueError("Les mentions supplémentaires nécessitent un envoi dans un salon. Les MP te sont réservés.")
-    return replace(reminder, message=message, recipient_ids=recipients)
+    return replace(reminder, title=title, message=message, recipient_ids=recipients)
 
 
 def _values(reminder: Reminder) -> tuple:
     return (
         reminder.channel_id, reminder.due_at, reminder.message, reminder.category,
-        reminder.mention_owner, json.dumps(reminder.recipient_ids), reminder.timezone,
+        reminder.mention_owner, json.dumps(reminder.recipient_ids), reminder.timezone, reminder.title,
     )
 
 
@@ -110,8 +125,8 @@ async def save_timezone(guild_id, user_id, value):
 async def _insert_reminder(cursor, reminder, preferences):
     await cursor.execute(
         "INSERT INTO guild_reminders "
-        "(channel_id, due_at, message, category, mention_owner, recipient_ids, timezone, guild_id, user_id, "
-        "personal_number, generation, parent_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        "(channel_id, due_at, message, category, mention_owner, recipient_ids, timezone, title, guild_id, user_id, "
+        "personal_number, generation, parent_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (*_values(reminder), reminder.guild_id, reminder.user_id, preferences["next_number"],
          preferences["generation"], reminder.parent_id),
     )
@@ -194,7 +209,7 @@ async def edit_reminder(reminder: Reminder) -> bool:
         async with db.cursor() as cursor:
             await cursor.execute(
                 "UPDATE guild_reminders SET channel_id = %s, due_at = %s, message = %s, "
-                "category = %s, mention_owner = %s, recipient_ids = %s, timezone = %s, status = 'pending', "
+                "category = %s, mention_owner = %s, recipient_ids = %s, timezone = %s, title = %s, status = 'pending', "
                 "attempts = 0, next_attempt_at = 0, claim_token = NULL, claimed_until = 0, "
                 "last_error = NULL, finished_at = NULL, revision = revision + 1 "
                 "WHERE id = %s AND guild_id = %s AND user_id = %s AND revision = %s "

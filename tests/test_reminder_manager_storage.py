@@ -32,12 +32,13 @@ def test_mysql_personal_numbering_reset_preserves_other_users_and_history_and_in
                 await cursor.execute("DELETE FROM reminder_preferences")
         finally:
             db.close()
-        original = store.Reminder(1, 2, None, int(time.time()) + 3600, "Ancien rappel 🎯")
+        original = store.Reminder(1, 2, None, int(time.time()) + 3600, "Ancien rappel 🎯", title="Mon premier titre")
         first = await store.create_reminder(original)
         second = await store.create_reminder(original)
         other_user = await store.create_reminder(replace(original, user_id=3))
         other_server = await store.create_reminder(replace(original, guild_id=999))
         assert (await store.get_reminder(first, 1, 2)).reference == 1
+        assert (await store.get_reminder(first, 1, 2)).title == original.title
         assert (await store.get_reminder(second, 1, 2)).reference == 2
         assert (await store.get_reminder(other_user, 1, 3)).reference == 1
         assert (await store.get_reminder(other_server, 999, 2)).reference == 1
@@ -59,6 +60,9 @@ def test_mysql_personal_numbering_reset_preserves_other_users_and_history_and_in
         reports = await asyncio.gather(*(store.snooze_reminder(source, int(time.time()) + 600) for _ in range(4)), return_exceptions=True)
         assert len([value for value in reports if isinstance(value, int)]) == 1
         assert all(isinstance(value, (int, ValueError)) for value in reports)
+        report_id = next(value for value in reports if isinstance(value, int))
+        report = await store.get_reminder(report_id, 1, 2)
+        assert report.title == original.title and report.message == original.message
         active = await store.list_reminders(1, 2)
         expected = tuple(sorted((record.id, record.revision, record.status) for record in active))
         added = await store.create_reminder(original)
@@ -91,7 +95,10 @@ def test_mysql_personal_numbering_reset_preserves_other_users_and_history_and_in
             await store.snooze_reminder(source, int(time.time()) + 600)
         with pytest.raises(ValueError):
             await store.reset_reminders(1, 2, 0, ())
-        assert await store.edit_reminder(replace(new, message="Texte modifié"))
+        assert await store.edit_reminder(replace(new, title="Nouveau titre", message="Texte modifié"))
+        edited = await store.get_reminder(new_id, 1, 2)
+        assert edited.title == "Nouveau titre" and edited.message == "Texte modifié"
+        assert edited.reference == 1 and edited.id == new_id
         assert not await store.delete_reminder(new_id, 1, 2, revision=new.revision)
         assert await store.delete_reminder(new_id, 1, 2, revision=new.revision + 1)
     asyncio.run(scenario())
@@ -121,13 +128,14 @@ def test_mysql_number_allocation_rolls_back_when_creation_commit_fails(monkeypat
     asyncio.run(scenario())
 
 
-def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_delivery_state(monkeypatch, tmp_path):
+@pytest.mark.parametrize("migration_cutoff", ["0022", "0023"])
+def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_delivery_state(monkeypatch, tmp_path, migration_cutoff):
     from src.core import schema_migrations
     current = Path("src/migrations")
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     for path in current.glob("*.sql"):
-        if path.name < "0022":
+        if path.name < migration_cutoff:
             (legacy / path.name).write_text(path.read_text())
 
     async def scenario():
@@ -139,10 +147,19 @@ def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_deli
             db = await connect("reminder_manager_upgrade_test")
             monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", legacy)
             await init_db(db)
+            bodies = {rid: "Réunion existante 🎯\r\nDétails conservés" for rid in (100, 150, 20, 30)}
+            bodies[30] = "Un ancien titre très long " + "texte " * 40
             async with db.cursor() as cursor:
                 for rid, gid, uid in [(100, 1, 2), (150, 1, 2), (20, 1, 3), (30, 999, 2)]:
-                    await cursor.execute("INSERT INTO guild_reminders (id, guild_id, user_id, channel_id, due_at, message, recipient_ids) "
-                                         "VALUES (%s, %s, %s, 77, 2000000000, 'Réunion existante 🎯', JSON_ARRAY(7))", (rid, gid, uid))
+                    extra_column = ", personal_number" if migration_cutoff == "0023" else ""
+                    extra_value = ", %s" if migration_cutoff == "0023" else ""
+                    args = (rid, gid, uid, bodies[rid], *((2 if rid == 150 else 1,) if extra_column else ()))
+                    await cursor.execute(
+                        "INSERT INTO guild_reminders (id, guild_id, user_id, channel_id, due_at, message, recipient_ids" + extra_column + ") "
+                        "VALUES (%s, %s, %s, 77, 2000000000, %s, JSON_ARRAY(7)" + extra_value + ")", args)
+                if migration_cutoff == "0023":
+                    await cursor.execute("INSERT INTO reminder_preferences (guild_id, user_id, next_number) "
+                                         "SELECT guild_id, user_id, MAX(personal_number) + 1 FROM guild_reminders GROUP BY guild_id, user_id")
                 await cursor.execute("UPDATE guild_reminders SET status = 'sending', claim_token = 'existing-claim', claimed_until = 2000000300, attempts = 2 WHERE id = 150")
             monkeypatch.setattr(schema_migrations, "MIGRATIONS_DIR", current)
             await init_db(db)
@@ -152,7 +169,8 @@ def test_mysql_upgrade_preserves_reminder_contents_global_ids_schedules_and_deli
                 rows = await cursor.fetchall()
                 assert [row["id"] for row in rows] == [20, 30, 100, 150]
                 assert [row["personal_number"] for row in rows] == [1, 1, 1, 2]
-                assert all(row["message"] == "Réunion existante 🎯" and row["due_at"] == 2000000000 for row in rows)
+                assert all(row["message"] == bodies[row["id"]] and row["due_at"] == 2000000000 for row in rows)
+                assert all(row["title"] == " ".join(bodies[row["id"]].split())[:80] for row in rows)
                 assert rows[-1]["claim_token"] == "existing-claim" and rows[-1]["attempts"] == 2 and rows[-1]["status"] == "sending"
                 await cursor.execute("SELECT next_number FROM reminder_preferences WHERE guild_id = 1 AND user_id = 2")
                 assert (await cursor.fetchone())["next_number"] == 3

@@ -48,13 +48,16 @@ def test_manager_sessions_are_private_and_bound_to_the_original_member_and_serve
     asyncio.run(scenario())
 
 
-def test_dashboard_labels_use_personal_numbers_text_and_dates_without_exposing_global_ids():
+def test_dashboard_labels_use_personal_numbers_and_titles_without_exposing_message_bodies_or_global_ids():
     async def scenario():
-        records = [reminder(id=9999, personal_number=1, message="Réunion du staff"), reminder(id=8888, personal_number=2)]
+        records = [reminder(id=9999, personal_number=1, title="Réunion du staff", message="Détails visibles dans la fiche seulement"),
+                   reminder(id=8888, personal_number=2)]
         dashboard = views.ReminderDashboard(1, 2, records, {"timezone": "Europe/Brussels", "generation": 0})
         select = next(item for item in dashboard.children if isinstance(item, discord.ui.Select) and item.row == 1)
         assert select.options[0].label == "#1 · Réunion du staff"
         assert "9999" not in str(dashboard.embed().to_dict())
+        assert "Détails visibles" not in str(dashboard.embed().to_dict())
+        assert dashboard.embed().fields[0].name == "#1 · Réunion du staff"
         assert {item.label for item in dashboard.children if isinstance(item, discord.ui.Button)} >= {
             "Créer un rappel", "Réinitialiser mes rappels", "Actualiser"}
         assert len(dashboard.embed()) < 6000
@@ -87,6 +90,7 @@ def test_full_wizard_uses_native_member_selection_and_saves_only_after_confirmat
         saved = reminder(id=99, personal_number=1, message="Réunion", generation=4)
         monkeypatch.setattr(editor.store, "get_owned_reminder", AsyncMock(return_value=saved))
         modal = editor.MessageModal(wizard)
+        modal.title_input._value = "Réunion du staff"
         modal.text._value = "Réunion"
         await modal.on_submit(interaction())
         await wizard.next(interaction())
@@ -115,11 +119,45 @@ def test_full_wizard_uses_native_member_selection_and_saves_only_after_confirmat
         create.assert_awaited_once()
         assert create.await_args.kwargs == {"expected_generation": 4}
         assert create.await_args.args[0].recipient_ids == (4, 5)
+        assert create.await_args.args[0].title == "Réunion du staff"
+        assert create.await_args.args[0].message == "Réunion"
         assert isinstance(inter.edit_original_response.await_args.kwargs["view"], views.ReminderDetails)
         with pytest.raises(ValueError):
             await wizard.save(interaction())
         create.assert_awaited_once()
     asyncio.run(scenario())
+
+
+def test_edit_form_prefills_and_saves_the_title_separately_from_the_message(monkeypatch):
+    async def scenario():
+        original = reminder(title="Réunion", message="Retrouve le staff à 18 h.")
+        wizard = editor.ReminderEditor(original, editing=True)
+        modal = editor.MessageModal(wizard)
+        assert len(modal.children) == 2
+        assert modal.title_input.default == "Réunion" and modal.text.default == original.message
+        assert modal.title_input.required and modal.text.required
+        modal.title_input._value = "  Réunion   du staff  "
+        modal.text._value = original.message
+        await modal.on_submit(interaction())
+        monkeypatch.setattr(store, "get_owned_reminder", AsyncMock(return_value=original))
+        edit = AsyncMock(return_value=True)
+        monkeypatch.setattr(store, "edit_reminder", edit)
+        await wizard.save(interaction())
+        saved = edit.await_args.args[0]
+        assert saved.title == "Réunion du staff" and saved.message == original.message
+        assert saved.id == original.id and saved.revision == original.revision
+    asyncio.run(scenario())
+
+
+def test_reminder_titles_are_validated_and_unicode_list_labels_fit_discord_limits():
+    for title in ("   ", "a" * 81):
+        with pytest.raises(ValueError, match="titre"):
+            store.validate_reminder(reminder(title=title))
+    legacy = store.validate_reminder(reminder(title="", message="  Ancien\nrappel 🎯  "))
+    assert legacy.title == "Ancien rappel 🎯" and legacy.message == "Ancien\nrappel 🎯"
+    titled = store.validate_reminder(reminder(title="🌙" * 80, personal_number=10**18))
+    assert titled.label.startswith(f"#{10**18} · ")
+    assert len(titled.label.encode("utf-16-le")) // 2 <= 100
 
 
 def test_switching_draft_to_dm_clears_recipients_and_skips_mentions_step(monkeypatch):

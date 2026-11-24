@@ -146,7 +146,9 @@ IDs. Previously displayed global numbers are replaced by those personal numbers.
 No data deletion or manual database reset is needed.
 
 Open `/reminder` and press **Créer un rappel** for the private five-step assistant:
-message, date, destination, member mentions, and a final review. Each step allows
+title and message, date, destination, member mentions, and a final review. The
+first form requires a short title (1–80 characters) and a separate message
+(1–1,000 characters). Each step allows
 back navigation; nothing is scheduled until **Programmer le rappel**. The review
 also has direct field-edit buttons. Quick dates include ten minutes, one hour
 and tomorrow at 18:00. Channel and member selection use native Discord menus;
@@ -156,11 +158,15 @@ clears additional recipients. **Mentions** remains available in the final review
 including when editing a DM reminder. It explains private delivery and offers a
 channel picker or the current channel before showing the member selector. Channel
 permissions are checked before accepting that change. No reminder categories are
-shown or selectable; cards and delivery messages use a generic reminder title.
+shown or selectable; cards and delivery messages use the reminder's own title.
 Legacy category metadata is retained internally so existing data needs no rewrite.
+Migration `0023_reminder_titles` derives titles from the existing messages while
+preserving their full contents and schedules. Title edits and postponements keep
+the title and message separate.
 
 `/reminder` opens the private manager, including empty states. Select a
-reminder by its text, personal number, date and destination to see its full
+reminder by its personal number and title, with its date and destination in the
+menu description, to see its full
 card. Buttons allow editing, ten-minute/hour postponement, deletion with
 confirmation, and returning to the list. **À venir**, **Échecs**, and **Envoyés
 récemment** tabs, pagination, refresh, timezone preferences and personal reset

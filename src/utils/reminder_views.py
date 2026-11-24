@@ -29,7 +29,7 @@ class ReminderDashboard(ReminderView):
         shown = self.records[self.page * 5:self.page * 5 + 5]
         if shown:
             select = discord.ui.Select(placeholder="Choisis un rappel pour le gérer", row=1, options=[
-                discord.SelectOption(label=f"#{record.reference} · {record.message}"[:100], value=str(record.id),
+                discord.SelectOption(label=record.label, value=str(record.id),
                     description=(datetime.fromtimestamp(record.due_at, ZoneInfo(preferences["timezone"])).strftime("%d/%m %H:%M %Z") + " · " +
                                 ("Message privé" if record.channel_id is None else
                                  f"#{guild.get_channel(record.channel_id).name}" if guild and guild.get_channel(record.channel_id) else "Salon du serveur"))[:100]) for record in shown])
@@ -54,8 +54,8 @@ class ReminderDashboard(ReminderView):
         for record in self.records[self.page * 5:self.page * 5 + 5]:
             target = f"<#{record.channel_id}>" if record.channel_id else "Message privé"
             previous = " · ancienne série" if record.generation != self.preferences["generation"] else ""
-            embed.add_field(name=f"Rappel #{record.reference}{previous}",
-                value=f"{record.message[:220]}\n<t:{record.due_at}:F> (<t:{record.due_at}:R>) · {target}" +
+            embed.add_field(name=f"{record.label}{previous}",
+                value=f"<t:{record.due_at}:F> (<t:{record.due_at}:R>) · {target}" +
                       ("\n📨 En cours d'envoi" if record.status == "sending" else ""), inline=False)
         embed.set_footer(text=f"Page {self.page + 1}/{max(1, (len(self.records) + 4) // 5)} · "
                          f"Fuseau : {self.preferences['timezone']} · Historique conservé 30 jours")
@@ -119,7 +119,7 @@ class ReminderDetails(ReminderView):
     def embed(self):
         embed = reminder_embed(self.reminder)
         if self.notice:
-            embed.title = f"{self.notice} · #{self.reminder.reference}"
+            embed.title = f"{self.notice} · {self.reminder.label}"
         if self.reminder.status == "sent":
             embed.add_field(name="Historique", value="Ce rappel a déjà été envoyé. Un report crée un nouveau rappel personnel.", inline=False)
         return embed

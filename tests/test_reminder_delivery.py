@@ -12,7 +12,7 @@ from src.utils.reminders import Reminder, validate_reminder
 
 
 def reminder(**changes):
-    return replace(Reminder(1, 2, 3, 2_000_000_000, "Check @everyone <@&9> <@99>", id=1), **changes)
+    return replace(Reminder(1, 2, 3, 2_000_000_000, "Check @everyone <@&9> <@99>", id=1, title="Rappel de test"), **changes)
 
 
 def setup_destination():
@@ -50,7 +50,7 @@ def test_channel_delivery_only_allows_explicit_user_mentions(category):
     kwargs = channel.send.await_args.kwargs
     assert kwargs["content"] == "<@2> <@4>"
     assert kwargs["embed"].description == "Check @everyone <@&9> <@99>"
-    assert kwargs["embed"].title == "⏰ Rappel"
+    assert kwargs["embed"].title == "⏰ Rappel de test"
     assert kwargs["embed"].fields[0].name == "Prévu pour le"
     assert kwargs["embed"].footer.text == "Rappel #1 · Créé par Creator"
     mentions = kwargs["allowed_mentions"].to_dict()

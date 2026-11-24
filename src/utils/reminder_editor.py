@@ -10,7 +10,7 @@ from src.utils.reminder_delivery import validate_destination
 from src.utils.reminder_time import PastTimeError, parse_reminder_time
 from src.utils.reminder_ui import NO_MENTIONS, STALE, ReminderModal, ReminderView, present, reminder_embed
 
-STEPS = ("Message", "Date", "Destination", "Mentions", "Vérification")
+STEPS = ("Titre et message", "Date", "Destination", "Mentions", "Vérification")
 
 
 class ReminderEditor(ReminderView):
@@ -24,7 +24,7 @@ class ReminderEditor(ReminderView):
             embed = reminder_embed(self.draft, title="Vérifie ton rappel avant d'enregistrer")
         else:
             embed = discord.Embed(title=f"⏰ {'Modifier' if self.editing else 'Créer'} un rappel · {STEPS[self.step]}",
-                description={0: "Écris le message que tu souhaites recevoir.",
+                description={0: "Définis un titre court pour retrouver ton rappel et le message que tu souhaites recevoir.",
                              1: "Choisis un délai rapide ou indique une date personnalisée.",
                              2: "Où souhaites-tu recevoir ce rappel ?",
                              3: ("Sélectionne les membres à mentionner, sans saisir leurs identifiants."
@@ -32,6 +32,8 @@ class ReminderEditor(ReminderView):
                                  "Ce rappel est envoyé en message privé, uniquement à toi.\n"
                                  "Pour mentionner d'autres membres, choisis un salon d'envoi ci-dessous."),
                              4: "Vérifie le message, la date et la destination."}[self.step], color=discord.Color.blurple())
+            if self.draft.title:
+                embed.add_field(name="Titre", value=self.draft.title, inline=False)
             if self.draft.message:
                 embed.add_field(name="Message", value=self.draft.message, inline=False)
             if self.draft.due_at:
@@ -47,7 +49,7 @@ class ReminderEditor(ReminderView):
     def build(self):
         self.clear_items()
         if self.step == 0:
-            self.button("Écrire le message", self.message_modal, row=0)
+            self.button("Définir le titre et le message", self.message_modal, row=0)
         elif self.step == 1:
             select = discord.ui.Select(placeholder="Quand te le rappeler ?", row=0, options=[
                 discord.SelectOption(label="Dans 10 minutes", value="10m"),
@@ -84,7 +86,7 @@ class ReminderEditor(ReminderView):
                 self.button("Me mentionner : " + ("oui" if self.draft.mention_owner else "non"), self.toggle_owner, row=1)
                 self.button("Retirer toutes les mentions", self.clear_mentions, row=1)
         elif self.step == 4:
-            for label, step in (("Message", 0), ("Date", 1), ("Destination", 2), ("Mentions", 3)):
+            for label, step in (("Titre et message", 0), ("Date", 1), ("Destination", 2), ("Mentions", 3)):
                 async def jump(interaction, target=step):
                     self.step = target
                     await self.redraw(interaction)
@@ -157,8 +159,8 @@ class ReminderEditor(ReminderView):
         await self.redraw(interaction)
 
     async def next(self, interaction):
-        if self.step == 0 and not self.draft.message.strip():
-            raise ValueError("Écris d'abord le message du rappel.")
+        if self.step == 0 and (not self.draft.title.strip() or not self.draft.message.strip()):
+            raise ValueError("Définis d'abord le titre et le message du rappel.")
         if self.step == 1 and self.draft.due_at <= time.time():
             raise ValueError("Choisis une date dans le futur.")
         if self.step == 2:
@@ -178,6 +180,8 @@ class ReminderEditor(ReminderView):
         self.saving = True
         try:
             await interaction.response.defer()
+            if not self.draft.title.strip():
+                raise ValueError("Définis le titre du rappel avec le bouton Titre et message.")
             reminder = store.validate_reminder(self.draft)
             if reminder.due_at <= time.time():
                 raise ValueError("La date est passée. Reviens à l'étape Date pour choisir un nouvel horaire.")
@@ -200,16 +204,22 @@ class ReminderEditor(ReminderView):
 
 class MessageModal(ReminderModal):
     def __init__(self, parent):
-        super().__init__(parent, title="Message du rappel")
+        super().__init__(parent, title="Titre et message du rappel")
+        self.title_input = discord.ui.TextInput(label="Titre du rappel", default=parent.draft.title or None,
+                                                placeholder="Exemple : Réunion du staff", min_length=1, max_length=80)
         self.text = discord.ui.TextInput(label="Que dois-tu te rappeler ?", style=discord.TextStyle.paragraph,
                                          default=parent.draft.message or None, max_length=1000)
+        self.add_item(self.title_input)
         self.add_item(self.text)
 
     async def on_submit(self, interaction):
+        title = " ".join(self.title_input.value.split())
+        if not title or len(title) > 80:
+            raise ValueError("Le titre doit contenir entre 1 et 80 caractères.")
         text = self.text.value.strip()
         if not text:
             raise ValueError("Écris un message pour le rappel.")
-        self.parent.draft = replace(self.parent.draft, message=text)
+        self.parent.draft = replace(self.parent.draft, title=title, message=text)
         await self.parent.redraw(interaction)
 
 

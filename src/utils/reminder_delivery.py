@@ -84,7 +84,7 @@ async def send_reminder(bot: discord.Client, reminder: Reminder) -> None:
     if reminder.mention_owner and reminder.user_id not in ids:
         ids.insert(0, reminder.user_id)
     embed = discord.Embed(
-        title="⏰ Rappel",
+        title=f"⏰ {reminder.display_title}",
         description=reminder.message,
         color=discord.Color.blurple(),
     )
