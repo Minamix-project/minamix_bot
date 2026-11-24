@@ -113,10 +113,11 @@ ownership for retries and use the configured technical error reporting.
 | `/back` | Clear your absence status |
 | `/absents` | List absent members — admin |
 | `/activity <user>` | View a member's activity — admin |
-| `/reminder create <when> <text> [...]` | Schedule a reminder, delivered by DM by default |
-| `/reminder list` | List your pending reminders and delivery failures in this server |
+| `/reminder create [when] [text] [...]` | Open the reminder assistant, or schedule directly with when and text |
+| `/reminder list` | Open your private reminder manager, delivery failures, history and preferences |
 | `/reminder edit <reminder_id> [...]` | Update one of your pending or failed reminders |
-| `/reminder delete <reminder_id>` | Delete one of your pending or failed reminders |
+| `/reminder delete <reminder_id>` | Select a personal reminder and confirm deletion |
+| `/reminder reset` | Confirm cancellation of your reminders in this server and restart numbering at #1 |
 
 ### Repository statistics in status
 
@@ -139,55 +140,85 @@ in the current container. GitHub request failures are retried after two minutes.
 
 ### Reminders
 
-Reminder command and option names follow the bot's English naming convention.
-Descriptions, choice labels, and bot messages are in French.
-Use a duration (`2h`, `1j 30m`, `1sem`), a date and time
-(`15/09/2027 20:00` or `2027-09-15 20:00`), `demain 18:00`,
-`aujourd'hui 18:00`, or a time such as `18:00` for today. Existing English
-duration units (`d`, `w`) and day names (`today`, `tomorrow`) remain accepted.
-Dates use **Europe/Brussels** unless you provide an IANA `timezone`, such as
-`UTC` or `America/Montreal`. Durations measure elapsed time. Past dates,
-invalid dates, ambiguous/nonexistent daylight-saving times, and schedules more
-than five years ahead are rejected. Discord displays confirmations in each
-reader's local timezone.
+Commands and parameters remain in English; all user-facing descriptions,
+controls, forms and errors are in French. Existing scheduled reminders survive
+upgrade with their text, destination, mentions, due time, delivery status and
+recovery lease unchanged. Migration `0022_reminder_manager` assigns personal
+numbers in creation order per member and server, while retaining stable internal
+IDs. Previously displayed global numbers are replaced by those personal numbers.
+No data deletion or manual database reset is needed.
+
+Use `/reminder create` without arguments for the private five-step assistant:
+message, date, destination, member mentions, and a final review. Each step allows
+back navigation; nothing is scheduled until **Programmer le rappel**. The review
+also has direct field-edit buttons. Quick dates include ten minutes, one hour
+and tomorrow at 18:00. Channel and member selection use native Discord menus;
+up to ten additional members can be selected, with separate controls for the
+creator's mention and clearing mentions. DM delivery skips the member step and
+clears additional recipients.
+
+Fast scheduling and parameter-based edits remain available:
 
 ```text
 /reminder create when:2h text:Vérifier les annonces
 /reminder create when:demain 18:00 text:Réunion du staff delivery:Salon actuel category:Réunion du staff
-/reminder create when:15/09/2027 20:00 text:Événement de guilde channel:#evenements recipients:@Alice @Bob category:Événement RP
-/reminder edit reminder_id:42 when:3h text:Nouvel horaire de réunion
-/reminder edit reminder_id:42 recipients:aucun mention:false
-/reminder delete reminder_id:42
+/reminder create when:15/09/2027 20:00 text:Événement de guilde channel:#evenements recipients:@Alice @Bob
+/reminder edit reminder_id:#1 when:3h text:Nouvel horaire de réunion
+/reminder edit reminder_id:1 recipients:aucun mention:false
+/reminder delete reminder_id:#1
 ```
 
-Choose `delivery:Message privé` for a private reminder, `delivery:Salon actuel` for the
-current server text channel, or a `channel` for another text channel. Selecting a
-channel implies channel delivery when `delivery` is omitted. The creator must
-be able to view and send messages there; the bot additionally needs Embed Links.
-Threads and non-text channels are not supported. All management responses are
-ephemeral, and members can only list, edit, or delete their own reminders in the
-current server. A reminder being sent cannot be edited or deleted.
+`/reminder list` opens the private manager, including empty states. Select a
+reminder by its text, personal number, date and destination to see its full
+card. Buttons allow editing, ten-minute/hour postponement, deletion with
+confirmation, and returning to the list. **À venir**, **Échecs**, and **Envoyés
+récemment** tabs, pagination, refresh, timezone preferences and personal reset
+are available. History from an earlier reset cycle is labelled separately.
+The `edit` and `delete` shortcuts autocomplete only the member's mutable reminders
+and use stable internal references when a suggestion is selected; manual input
+accepts both `#1` and `1` for the current personal series. `edit` without changed
+fields opens the editor. A failed or overdue reminder opens at the date step
+instead of requiring the user to discover why an unchanged past date fails.
 
-`mention` controls the creator's mention (enabled by default). `recipients`
-accepts up to ten additional member mentions or IDs separated by spaces or
-commas, for channel delivery only. Every selected member must be able to view
-the destination. Roles, `@everyone`, and unselected users are never pinged.
-Switching to DM clears additional recipients; use `recipients:aucun` to clear
-them explicitly (`none` remains accepted). Text is always free-form (1–1,000
-characters), with optional `Rappel personnalisé`, `Réunion du staff`, `Échéance`,
-`Événement HRP`, or `Événement RP` category labels. Stored category and delivery
-values remain unchanged, so existing reminders need no database migration.
+**Réinitialiser mes rappels**, also available as `/reminder reset`, confirms
+cancellation of the member's pending and failed reminders in the current server
+and restarts the next visible number at #1. Other members, other servers, sent
+history and the saved timezone are retained. Reset is refused while a reminder
+is being sent or when the confirmation's reminder set has changed. Creation,
+number allocation and reset are transactional. Generations invalidate creation
+drafts and old snooze buttons after reset; stable IDs and revision checks prevent
+old controls from targeting a different reminder with a reused visible number.
 
-Reminders are stored in MySQL and checked every 15 seconds while the bot is
-online. Overdue reminders are delivered after a restart. The worker rechecks
-membership and destination permissions before sending, uses atomic claims to
-coordinate workers, and recovers interrupted claims after five minutes.
-Transient failures retry up to five times with backoff; permanent failures
-appear in `/reminder list`, with an attempted DM notification to the creator.
-Edit a failed reminder with a new future schedule to retry it. Sent and failed
-records are removed after 30 days. As with other Discord API sends, a crash
-after Discord accepts the message but before MySQL records success can cause
-a duplicate on recovery. Recurring reminders are a future extension.
+Dates accept `2h`, `1j 30m`, `1sem`, `15/09/2027 20:00`, `2027-09-15 20:00`,
+`demain 18:00`, `aujourd'hui 18:00`, and `18:00` for today. English duration
+units and day names remain accepted. A bare time already past offers an explicit
+choice of tomorrow at that time; it is never silently shifted. Other past dates,
+invalid or ambiguous/nonexistent local times, and schedules over five years away
+are rejected. The member can save a timezone per server from common French-labelled
+choices or an IANA name; the default remains Europe/Brussels. Existing schedules
+retain their due time. Discord timestamps display in the reader's local timezone.
+
+Choosing `channel` implies channel delivery. The creator must see and send in
+the destination; the bot also needs Embed Links. Threads remain unsupported.
+Legacy `recipients` accepts mentions or IDs separated by spaces or commas, and
+`aucun`/`none` clears them. All selected members must see the channel; roles,
+@everyone and unselected users cannot be pinged. Creator-only delivered-message
+buttons **Reporter de 10 min / 1 heure** work in DMs and server channels, including
+after bot restart. Snoozing a delivered reminder creates one new personal reminder;
+concurrent/repeated clicks cannot create duplicate reports. Editing a pending
+reminder postpones that reminder in place. Permissions are checked again on save,
+snooze and delivery. Management sessions expire after five minutes with instructions
+to reopen the manager.
+
+MySQL reminders are polled every 15 seconds while online. At most three delivery
+tasks run at once; only free slots are claimed, and one slow send cannot hold up
+other slots or later polls. Shutdown cancels and awaits active sends, leaving
+interrupted leases recoverable after five minutes. Failed transient sends retry
+up to five times with backoff; terminal failures appear in the manager and trigger
+an attempted private notification identifying the originating server. Sent and
+failed records are retained for 30 days. A crash after Discord accepts a message
+but before MySQL records success can still cause a duplicate on recovery.
+Recurring reminders are not introduced.
 
 ### Economy and shop
 

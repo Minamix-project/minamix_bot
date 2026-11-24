@@ -140,7 +140,9 @@ def test_creation_defaults_and_edit_to_dm_clear_recipients(monkeypatch):
     monkeypatch.setattr(command, "validate_destination", validate)
     monkeypatch.setattr(command, "create_reminder", create)
     monkeypatch.setattr(command, "edit_reminder", edit)
-    monkeypatch.setattr(command, "get_reminder", AsyncMock(return_value=reminder(recipient_ids=(4,))))
+    monkeypatch.setattr(command, "resolve_reminder", AsyncMock(return_value=reminder(recipient_ids=(4,))))
+    monkeypatch.setattr(command, "get_owned_reminder", AsyncMock(return_value=reminder(id=17, personal_number=1)))
+    monkeypatch.setattr(command, "get_preferences", AsyncMock(return_value={"timezone": "Europe/Brussels", "generation": 0}))
     group = command.Remind()
     asyncio.run(group.create.callback(group, interaction, "2h", "Check announcements"))
     assert create.await_args.args[0].channel_id is None
@@ -179,14 +181,19 @@ def test_interrupted_final_attempt_is_not_sent_again(monkeypatch):
 
 def test_worker_continues_after_one_reminder_cannot_be_finalized(monkeypatch):
     first, second = reminder(id=1), reminder(id=2)
-    claim = AsyncMock(side_effect=[first, second, None])
+    queue = [first, second]
+    claim = AsyncMock(side_effect=lambda *_: queue.pop(0) if queue else None)
     deliver = AsyncMock(side_effect=[RuntimeError("Database temporarily unavailable"), None])
     cleanup = AsyncMock()
     monkeypatch.setattr(handler, "claim_next_reminder", claim)
     monkeypatch.setattr(handler, "deliver_claimed_reminder", deliver)
     monkeypatch.setattr(handler, "purge_finished_reminders", cleanup)
-    cog = SimpleNamespace(bot=Mock(), _last_cleanup=0)
-    asyncio.run(handler.ReminderDelivery.deliver.coro(cog))
+    async def scenario():
+        cog = SimpleNamespace(bot=Mock(), _last_cleanup=0, _inflight=set())
+        cog.deliver_one = lambda reminder: handler.ReminderDelivery.deliver_one(cog, reminder)
+        await handler.ReminderDelivery.deliver.coro(cog)
+        await asyncio.gather(*cog._inflight)
+    asyncio.run(scenario())
     assert deliver.await_count == 2
     cleanup.assert_awaited_once()
 

@@ -109,10 +109,13 @@ async def send_reminder(bot: discord.Client, reminder: Reminder) -> None:
         color=discord.Color.blurple(),
     )
     embed.add_field(name="Prévu pour le", value=f"<t:{reminder.due_at}:F>")
-    embed.set_footer(text=f"Rappel #{reminder.id} · Créé par {owner.display_name}")
+    embed.add_field(name="Serveur d'origine", value=str(guild.name))
+    embed.set_footer(text=f"Rappel #{reminder.reference} · Créé par {owner.display_name}")
+    from src.utils.reminder_actions import snooze_view
     await target.send(
         content=" ".join(f"<@{user_id}>" for user_id in ids) or None,
         embed=embed,
+        view=snooze_view(reminder),
         allowed_mentions=discord.AllowedMentions(
             everyone=False, roles=False, users=[discord.Object(id=user_id) for user_id in ids], replied_user=False,
         ),
