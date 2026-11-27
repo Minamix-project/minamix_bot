@@ -7,7 +7,8 @@ from src.utils.pagination import PaginationView
 from src.utils.permissions import ADMIN_COMMANDS
 
 PAGE_SIZE = 10
-_ALL_COMMANDS = sorted((*ADMIN_COMMANDS, "ticket"))
+_COMPONENT_COMMANDS = {"ticket", "rproles"}
+_ALL_COMMANDS = sorted(ADMIN_COMMANDS | _COMPONENT_COMMANDS)
 
 
 async def _commande_autocomplete(interaction: Interaction, current: str):
@@ -31,9 +32,9 @@ async def register(bot):
         if auteur is not None:
             conditions.append("actor_id = %s")
             params.append(auteur.id)
-        if commande == "ticket":
+        if commande in _COMPONENT_COMMANDS:
             conditions.append("action LIKE %s")
-            params.append("ticket.%")
+            params.append(f"{commande}.%")
         elif commande is not None:
             conditions.append("action = %s")
             params.append(commande)

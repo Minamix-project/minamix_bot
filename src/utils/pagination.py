@@ -3,6 +3,24 @@ from collections.abc import Callable
 import discord
 
 
+def add_page_buttons(view, on_previous, on_next, *, row=None):
+    previous = discord.ui.Button(label="◀ Précédent", style=discord.ButtonStyle.secondary, row=row)
+    indicator = discord.ui.Button(label="1/1", style=discord.ButtonStyle.secondary, disabled=True, row=row)
+    following = discord.ui.Button(label="Suivant ▶", style=discord.ButtonStyle.secondary, row=row)
+    previous.callback = on_previous
+    following.callback = on_next
+    for button in (previous, indicator, following):
+        view.add_item(button)
+    return previous, indicator, following
+
+
+def update_page_buttons(buttons, page, total_pages):
+    previous, indicator, following = buttons
+    previous.disabled = page <= 1
+    indicator.label = f"{page}/{total_pages}"
+    following.disabled = page >= total_pages
+
+
 class PaginationView(discord.ui.View):
     """Navigate through multiple embeds; only the command author may interact."""
 
@@ -15,12 +33,11 @@ class PaginationView(discord.ui.View):
         self.page = min(max(initial_page, 1), self.total_pages)
         self.render_page = render_page
         self.message: discord.Message | None = None
+        self.previous, self.indicator, self.next = add_page_buttons(self, self._previous_page, self._next_page)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
-        self.previous.disabled = self.page <= 1
-        self.indicator.label = f"{self.page}/{self.total_pages}"
-        self.next.disabled = self.page >= self.total_pages
+        update_page_buttons((self.previous, self.indicator, self.next), self.page, self.total_pages)
 
     def current_embed(self) -> discord.Embed:
         return self.render_page(self.page)
@@ -38,17 +55,11 @@ class PaginationView(discord.ui.View):
         self._update_buttons()
         await interaction.response.edit_message(embed=self.current_embed(), view=self)
 
-    @discord.ui.button(label="◀ Précédent", style=discord.ButtonStyle.secondary)
-    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
+    async def _previous_page(self, interaction: discord.Interaction):
         self.page -= 1
         await self._show_page(interaction)
 
-    @discord.ui.button(label="1/1", style=discord.ButtonStyle.secondary, disabled=True)
-    async def indicator(self, _interaction: discord.Interaction, _button: discord.ui.Button):
-        pass
-
-    @discord.ui.button(label="Suivant ▶", style=discord.ButtonStyle.secondary)
-    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
+    async def _next_page(self, interaction: discord.Interaction):
         self.page += 1
         await self._show_page(interaction)
 
