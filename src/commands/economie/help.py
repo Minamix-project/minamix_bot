@@ -14,7 +14,7 @@ _GENERAL = (
     "Panneau de support : ouvre un ticket privé depuis le menu du salon support.\n"
     "`/ticket create <reason> [panel]` — Ouvrir un ticket sans passer par le panneau (un par catégorie)\n"
     "Pour fermer ton ticket, utilise le bouton **Fermer le ticket**, puis confirme.\n"
-    "`/reminder create|list|edit|delete` — Programmer et gérer tes rappels\n"
+    "`/reminder` — Gérer tes rappels, pré-rappels, reports, mentions, historique et réglages avec les boutons\n"
     "`/afk` — Signaler une absence et sa durée\n"
     "`/back` — Mettre fin à ton absence\n"
     "`/status` — Voir l'état et la version du bot\n"

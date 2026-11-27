@@ -27,16 +27,16 @@ async def deliver_claimed_reminder(bot, reminder) -> None:
         detail = delivery_error_message(
             str(exc) if isinstance(exc, ValueError) else "Discord denied delivery or the destination was removed."
         )
-        await finish_reminder(reminder, int(time.time()), error=detail, permanent=True)
-        await notify_failure(bot, reminder)
+        if await finish_reminder(reminder, int(time.time()), error=detail, permanent=True):
+            await notify_failure(bot, reminder)
     except Exception as exc:
         # Do not persist raw API responses or reminder contents in error fields.
-        await finish_reminder(
+        saved = await finish_reminder(
             reminder, int(time.time()),
             error=delivery_error_message("Temporary delivery failure. Please try again later."),
         )
         await report_error(bot, guild_ids=reminder.guild_id, source=f"reminder:{reminder.id}", error=exc)
-        if reminder.attempts >= MAX_ATTEMPTS:
+        if saved and reminder.attempts >= MAX_ATTEMPTS:
             await notify_failure(bot, reminder)
     else:
         await finish_reminder(reminder, int(time.time()))
@@ -45,9 +45,14 @@ async def deliver_claimed_reminder(bot, reminder) -> None:
 async def notify_failure(bot, reminder) -> None:
     try:
         user = bot.get_user(reminder.user_id) or await bot.fetch_user(reminder.user_id)
+        guild = bot.get_guild(reminder.guild_id)
+        origin = f" sur **{discord.utils.escape_markdown(guild.name)}**" if guild is not None and isinstance(guild.name, str) else ""
+        advance = reminder.delivery_kind == "advance"
+        label = "pré-rappel" if advance else "rappel"
         await user.send(
-            f"Le rappel #{reminder.id} n'a pas pu être envoyé. "
-            "Utilise `/reminder list` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
+            f"Le {label} #{reminder.reference}{origin} n'a pas pu être envoyé. "
+            + ("Le rappel principal reste programmé. " if advance else "") +
+            "Utilise `/reminder` sur le serveur d'origine pour connaître la raison, puis modifie ou supprime le rappel.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:
@@ -58,6 +63,7 @@ class ReminderDelivery(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._last_cleanup = 0
+        self._inflight = set()
         self.deliver.start()
 
     async def cog_unload(self):
@@ -65,20 +71,37 @@ class ReminderDelivery(commands.Cog):
         self.deliver.cancel()
         if task is not None:
             await asyncio.gather(task, return_exceptions=True)
+        for task in list(self._inflight):
+            task.cancel()
+        await asyncio.gather(*self._inflight, return_exceptions=True)
+
+    async def deliver_one(self, reminder):
+        for index in range(25):
+            try:
+                await deliver_claimed_reminder(self.bot, reminder)
+            except Exception:
+                logger.exception("Could not finalize reminder %s", reminder.id)
+            if index == 24:
+                return
+            try:
+                reminder = await claim_next_reminder(int(time.time()), GUILD_IDS)
+            except Exception:
+                logger.exception("Could not claim next reminder in a free delivery slot")
+                return
+            if reminder is None:
+                return
 
     @tasks.loop(seconds=15)
     async def deliver(self):
         try:
-            for _ in range(25):
+            # Claim only available delivery slots: leases never expire in a local queue.
+            for _ in range(max(0, 3 - len(self._inflight))):
                 reminder = await claim_next_reminder(int(time.time()), GUILD_IDS)
                 if reminder is None:
                     break
-                try:
-                    await deliver_claimed_reminder(self.bot, reminder)
-                except Exception:
-                    # A database failure leaves the lease recoverable. One bad
-                    # reminder must not stop the worker permanently.
-                    logger.exception("Could not finalize reminder %s", reminder.id)
+                task = asyncio.create_task(self.deliver_one(reminder), name=f"reminder-delivery-{reminder.id}")
+                self._inflight.add(task)
+                task.add_done_callback(self._inflight.discard)
             now = int(time.time())
             if now - self._last_cleanup >= 3600:
                 await purge_finished_reminders(now)
@@ -92,4 +115,6 @@ class ReminderDelivery(commands.Cog):
 
 
 async def register(bot):
+    from src.utils.reminder_actions import SnoozeButton
+    bot.add_dynamic_items(SnoozeButton)
     await bot.add_cog(ReminderDelivery(bot))

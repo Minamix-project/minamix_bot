@@ -1,10 +1,8 @@
 """Validate destinations and restrict reminder mentions to explicitly selected users."""
 
-import re
-
 import discord
 
-from src.utils.reminders import CATEGORIES, Reminder
+from src.utils.reminders import Reminder
 
 # Translate failures stored by the first release without rewriting reminder data.
 _DELIVERY_ERRORS = {
@@ -31,24 +29,6 @@ def delivery_error_message(detail: str) -> str:
     if detail in _DELIVERY_ERRORS.values():
         return detail
     return "L'envoi du rappel a échoué. Vérifie sa destination et les permissions, puis réessaie."
-
-
-def parse_recipients(value: str) -> tuple[int, ...]:
-    if value.strip().lower() in {"aucun", "none"}:
-        return ()
-    ids = []
-    for token in re.split(r"[\s,]+", value.strip()):
-        match = re.fullmatch(r"(?:<@!?(\d{1,20})>|(\d{1,20}))", token)
-        if not match:
-            raise ValueError("Utilise des mentions ou identifiants de membres séparés par des espaces, ou 'aucun'.")
-        user_id = int(match[1] or match[2])
-        if not 0 < user_id < 2**64:
-            raise ValueError("Identifiant de membre invalide.")
-        if user_id not in ids:
-            ids.append(user_id)
-    if len(ids) > 10:
-        raise ValueError("Sélectionne au maximum 10 membres supplémentaires.")
-    return tuple(ids)
 
 
 async def resolve_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
@@ -103,16 +83,22 @@ async def send_reminder(bot: discord.Client, reminder: Reminder) -> None:
     ids = list(reminder.recipient_ids)
     if reminder.mention_owner and reminder.user_id not in ids:
         ids.insert(0, reminder.user_id)
+    advance = reminder.delivery_kind == "advance"
     embed = discord.Embed(
-        title=f"⏰ {CATEGORIES[reminder.category]}",
+        title=f"🔔 Pré-rappel · {reminder.display_title}" if advance else f"⏰ {reminder.display_title}",
         description=reminder.message,
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="Prévu pour le", value=f"<t:{reminder.due_at}:F>")
-    embed.set_footer(text=f"Rappel #{reminder.id} · Créé par {owner.display_name}")
+    embed.add_field(name="Rappel principal prévu pour" if advance else "Prévu pour le", value=f"<t:{reminder.due_at}:F> (<t:{reminder.due_at}:R>)")
+    if advance:
+        embed.add_field(name="Pré-rappel", value=f"{reminder.advance_minutes} minutes avant", inline=False)
+    embed.add_field(name="Serveur d'origine", value=str(guild.name))
+    embed.set_footer(text=f"Rappel #{reminder.reference} · Créé par {owner.display_name}")
+    from src.utils.reminder_actions import snooze_view
     await target.send(
         content=" ".join(f"<@{user_id}>" for user_id in ids) or None,
         embed=embed,
+        view=None if advance else snooze_view(reminder),
         allowed_mentions=discord.AllowedMentions(
             everyone=False, roles=False, users=[discord.Object(id=user_id) for user_id in ids], replied_user=False,
         ),

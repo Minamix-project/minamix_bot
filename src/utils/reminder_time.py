@@ -9,6 +9,12 @@ _DURATION = re.compile(r"(\d+)\s*(sem|[smhjdw])", re.IGNORECASE)
 _SECONDS = {"s": 1, "m": 60, "h": 3600, "j": 86400, "sem": 604800, "d": 86400, "w": 604800}
 
 
+class PastTimeError(ValueError):
+    def __init__(self, value):
+        super().__init__("Cette heure est déjà passée aujourd'hui. Tu peux choisir demain à la même heure.")
+        self.tomorrow = f"demain {value}"
+
+
 def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, now: datetime | None = None) -> int:
     """Return a UTC Unix timestamp for a duration, day + time, date, or time.
 
@@ -54,6 +60,8 @@ def parse_reminder_time(value: str, timezone_name: str = DEFAULT_TIMEZONE, *, no
         timestamp = candidates.pop()
 
     if timestamp <= now.timestamp():
+        if re.fullmatch(r"\d{1,2}:\d{2}", raw):
+            raise PastTimeError(raw)
         raise ValueError("Le rappel doit être dans le futur. Une heure sans date correspond à aujourd'hui.")
     if timestamp > int(now.timestamp()) + 5 * 366 * 86400:
         raise ValueError("Les rappels peuvent être programmés au maximum cinq ans à l'avance.")

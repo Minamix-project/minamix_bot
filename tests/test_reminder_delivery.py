@@ -12,7 +12,7 @@ from src.utils.reminders import Reminder, validate_reminder
 
 
 def reminder(**changes):
-    return replace(Reminder(1, 2, 3, 2_000_000_000, "Check @everyone <@&9> <@99>", id=1), **changes)
+    return replace(Reminder(1, 2, 3, 2_000_000_000, "Check @everyone <@&9> <@99>", id=1, title="Rappel de test"), **changes)
 
 
 def setup_destination():
@@ -35,18 +35,6 @@ def setup_destination():
     return bot, guild, owner, guest, channel
 
 
-@pytest.mark.parametrize("value,expected", [("<@2> <@!4>,2", (2, 4)), ("aucun", ()), ("none", ()), ("2 4", (2, 4))])
-def test_recipient_selection(value, expected):
-    assert delivery.parse_recipients(value) == expected
-
-
-@pytest.mark.parametrize("value", ["@everyone", "<@&123>", "member-name", "", "0", str(2**64),
-                                  " ".join(str(number) for number in range(1, 12))])
-def test_invalid_recipient_selection(value):
-    with pytest.raises(ValueError):
-        delivery.parse_recipients(value)
-
-
 def test_text_validation_and_dm_recipients():
     for text in (" ", "x" * 1001):
         with pytest.raises(ValueError):
@@ -55,13 +43,14 @@ def test_text_validation_and_dm_recipients():
         validate_reminder(reminder(channel_id=None, recipient_ids=(4,)))
 
 
-def test_channel_delivery_only_allows_explicit_user_mentions():
+@pytest.mark.parametrize("category", ["custom", "staff_meeting", "rp_event"])
+def test_channel_delivery_only_allows_explicit_user_mentions(category):
     bot, _guild, _owner, _guest, channel = setup_destination()
-    asyncio.run(delivery.send_reminder(bot, reminder(recipient_ids=(4,))))
+    asyncio.run(delivery.send_reminder(bot, reminder(recipient_ids=(4,), category=category)))
     kwargs = channel.send.await_args.kwargs
     assert kwargs["content"] == "<@2> <@4>"
     assert kwargs["embed"].description == "Check @everyone <@&9> <@99>"
-    assert kwargs["embed"].title == "⏰ Rappel personnalisé"
+    assert kwargs["embed"].title == "⏰ Rappel de test"
     assert kwargs["embed"].fields[0].name == "Prévu pour le"
     assert kwargs["embed"].footer.text == "Rappel #1 · Créé par Creator"
     mentions = kwargs["allowed_mentions"].to_dict()
@@ -128,28 +117,6 @@ def test_cancellation_leaves_the_lease_recoverable(monkeypatch):
     finish.assert_not_awaited()
 
 
-def test_creation_defaults_and_edit_to_dm_clear_recipients(monkeypatch):
-    from src.commands.general import remind as command
-
-    interaction = SimpleNamespace(
-        guild_id=1, user=SimpleNamespace(id=2), client=Mock(),
-        response=SimpleNamespace(defer=AsyncMock()), followup=SimpleNamespace(send=AsyncMock()),
-    )
-    validate = AsyncMock()
-    create, edit = AsyncMock(return_value=17), AsyncMock(return_value=True)
-    monkeypatch.setattr(command, "validate_destination", validate)
-    monkeypatch.setattr(command, "create_reminder", create)
-    monkeypatch.setattr(command, "edit_reminder", edit)
-    monkeypatch.setattr(command, "get_reminder", AsyncMock(return_value=reminder(recipient_ids=(4,))))
-    group = command.Remind()
-    asyncio.run(group.create.callback(group, interaction, "2h", "Check announcements"))
-    assert create.await_args.args[0].channel_id is None
-    assert interaction.response.defer.await_args.kwargs == {"ephemeral": True}
-    asyncio.run(group.edit.callback(group, interaction, "1", delivery="dm"))
-    assert edit.await_args.args[0].channel_id is None
-    assert edit.await_args.args[0].recipient_ids == ()
-
-
 def test_worker_starts_once_and_stops_on_cog_unload():
     async def scenario():
         bot = Mock()
@@ -179,14 +146,19 @@ def test_interrupted_final_attempt_is_not_sent_again(monkeypatch):
 
 def test_worker_continues_after_one_reminder_cannot_be_finalized(monkeypatch):
     first, second = reminder(id=1), reminder(id=2)
-    claim = AsyncMock(side_effect=[first, second, None])
+    queue = [first, second]
+    claim = AsyncMock(side_effect=lambda *_: queue.pop(0) if queue else None)
     deliver = AsyncMock(side_effect=[RuntimeError("Database temporarily unavailable"), None])
     cleanup = AsyncMock()
     monkeypatch.setattr(handler, "claim_next_reminder", claim)
     monkeypatch.setattr(handler, "deliver_claimed_reminder", deliver)
     monkeypatch.setattr(handler, "purge_finished_reminders", cleanup)
-    cog = SimpleNamespace(bot=Mock(), _last_cleanup=0)
-    asyncio.run(handler.ReminderDelivery.deliver.coro(cog))
+    async def scenario():
+        cog = SimpleNamespace(bot=Mock(), _last_cleanup=0, _inflight=set())
+        cog.deliver_one = lambda reminder: handler.ReminderDelivery.deliver_one(cog, reminder)
+        await handler.ReminderDelivery.deliver.coro(cog)
+        await asyncio.gather(*cog._inflight)
+    asyncio.run(scenario())
     assert deliver.await_count == 2
     cleanup.assert_awaited_once()
 
