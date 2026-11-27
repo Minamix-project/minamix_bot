@@ -451,6 +451,8 @@ remain until removed by administrators; the database cleaner does not remove the
 | --- | --- |
 | `/roll <expression>` | Roll dice; use `/roll help` for syntax |
 | `/rplist [user] [page]` | List characters |
+| `/rpprofile` | Privately view a character's profile and RP attributes |
+| `/rproles` | Assign character roles and manage RP categories and validator access |
 | `/rpbourse [user]` | Show a character's Nax balance |
 | `/rpcreate <user> <name> <prefix> <image>` | Create a character — admin |
 | `/rpedit <user>` | Edit a name or prefix — admin |
@@ -461,6 +463,32 @@ remain until removed by administrators; the database cleaner does not remove the
 | `/setrpchannel <channel>` | Configure the RP announcement channel — admin |
 | `/addnax <user> <amount>` | Add Nax — admin |
 | `/removenax <user> <amount>` | Remove Nax — admin |
+
+#### Character roles
+
+Use `/rpprofile` to choose a server member and browse their characters. The
+answer is private to the member using the command. Category names and order
+come from server configuration. Role names and the embed accent color come
+from Discord, and the profile sends no role notifications.
+
+Members with **Administrator** or **Manage Server** can use `/rproles` to
+configure categories, link existing Discord roles and delegate assignment
+access to selected validator roles under **Configurer les accès**. Validators
+can edit character assignments in **Gérer les personnages**. Review the draft
+before saving it. Categories are optional and accept either a single role or
+multiple roles per character. The bot reads role metadata from Discord and
+stores each assignment against the character and server in MySQL.
+
+On Aurum, an administrator can open **Configurer les catégories → Importer
+les rôles RP initiaux** and confirm the six categories and 24 role links.
+All 24 Discord roles must exist in that server. An import conflict leaves the
+current configuration intact. After the import succeeds, use the same menu to
+edit the categories and links. Use **Configurer les accès** to select the
+server's Cactus role when it should be able to manage assignments.
+
+When a Discord role is deleted, the category editor marks it as unavailable.
+An administrator can unlink it after reviewing the number of affected characters.
+Use `/audit commande:rproles` to review changes.
 
 Dice rolls support 200 base dice per group, up to 20 repeated sets and four
 semicolon-separated expressions. A shared budget of 10,000 actual random draws

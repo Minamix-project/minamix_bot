@@ -34,15 +34,18 @@ _ECONOMY = (
 
 _RP_PUBLIC = (
     "`/rplist [user]` — Lister des personnages avec navigation\n"
+    "`/rpprofile` — Consulter la fiche et les attributs RP d'un personnage en privé\n"
     "`/rpbourse [user]` — Consulter la bourse Nax d'un personnage\n"
-    "`/pay <user> <amount> <reason>` — Transférer des NAX entre personnages RP (choisir la devise NAX)"
+    "`/pay <user> <amount> <reason>` — Transférer des NAX entre personnages RP (choisir la devise NAX)\n"
+    "`/rproles` — Gérer les attributions RP (administration et rôles de validation habilités)"
 )
 
 _RP_MANAGEMENT = (
     "`/rpcreate <user> <name> <prefix> <image>` — Créer un personnage\n"
     "`/rpedit <user>` — Modifier le nom ou le préfixe\n"
     "`/rpimage <user> <image>` — Changer l'image\n"
-    "`/rpdelete <user>` — Supprimer un personnage"
+    "`/rpdelete <user>` — Supprimer un personnage\n"
+    "`/rproles` — Configurer les catégories, les rôles liés et les accès de validation"
 )
 
 _ADMIN_ECONOMY = (
